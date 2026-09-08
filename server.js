@@ -14,8 +14,12 @@ const AI_BASE_URL = (process.env.AI_BASE_URL || 'https://api.deepseek.com').repl
 const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
-const memoryAnnouncements = [{id:1,slug:'screen-expanded-v1-2',title:'AI 智能选股范围已扩大',content:'智能选股已从固定 29 只样本扩大到约 1200 只成交较活跃的沪深 A 股。投资周期和风险偏好现在会真正影响筛选结果。',level:'更新',active:true,created_at:new Date().toISOString()}];
+const memoryAnnouncements = [
+  {id:2,slug:'trend-center-v1-4',title:'趋势预测中心已上线',content:'新增未来5、20、60个交易日趋势研究：显示历史相似条件下的上涨概率、跑赢市场基准概率、收益区间、样本数与历史验证命中率。概率是历史统计，不是涨跌保证。',level:'更新',active:true,created_at:new Date().toISOString()},
+  {id:1,slug:'screen-expanded-v1-2',title:'AI 智能选股范围已扩大',content:'智能选股已从固定 29 只样本扩大到约 1200 只成交较活跃的沪深 A 股。投资周期和风险偏好现在会真正影响筛选结果。',level:'更新',active:true,created_at:new Date().toISOString()}
+];
 const memoryAnnouncementReads = new Map();
+const memoryPredictions = [];
 const aiUsage = new Map();
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5 }) : null;
 const CN_NAMES = {
@@ -65,8 +69,15 @@ async function initUsers() {
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (announcement_id,user_id)
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS prediction_runs (
+    id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    symbol VARCHAR(24) NOT NULL, name VARCHAR(120) NOT NULL, result_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await pool.query('CREATE INDEX IF NOT EXISTS prediction_runs_user_symbol_idx ON prediction_runs(user_id,symbol,created_at DESC)');
   await pool.query(`INSERT INTO users (username,display_name,password_hash,role) VALUES ($1,'Allen',$2,'admin') ON CONFLICT (username) DO NOTHING`,[USERNAME,adminHash]);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('screen-expanded-v1-2','AI 智能选股范围已扩大','智能选股已从固定 29 只样本扩大到约 1200 只成交较活跃的沪深 A 股。投资周期和风险偏好现在会真正影响筛选结果。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('trend-center-v1-4','趋势预测中心已上线','新增未来5、20、60个交易日趋势研究：显示历史相似条件下的上涨概率、跑赢市场基准概率、收益区间、样本数与历史验证命中率。概率是历史统计，不是涨跌保证。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -246,7 +257,136 @@ function stockContext(stock) {
   };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.3.0', aiConfigured:Boolean(AI_API_KEY) }));
+function meanAt(rows, index, count, key = 'close') {
+  if (index - count + 1 < 0) return null;
+  const values = rows.slice(index - count + 1, index + 1).map(row => row[key]).filter(Number.isFinite);
+  return values.length === count ? values.reduce((sum, value) => sum + value, 0) / count : null;
+}
+
+function percentChange(from, to) {
+  return Number.isFinite(from) && Number.isFinite(to) && from !== 0 ? (to / from - 1) * 100 : null;
+}
+
+function percentile(values, fraction) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const position = (sorted.length - 1) * fraction;
+  const lower = Math.floor(position), upper = Math.ceil(position);
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+}
+
+async function getDailySeries(rawSymbol) {
+  const symbol = normalizeSymbol(rawSymbol);
+  if (!symbol) throw new Error('股票代码无效');
+  const chart = await yahooJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d&events=div%2Csplits`);
+  const result = chart.chart?.result?.[0];
+  if (!result) throw new Error('没有找到该股票');
+  const quote = result.indicators?.quote?.[0] || {};
+  const adjusted = result.indicators?.adjclose?.[0]?.adjclose || quote.close || [];
+  const rows = (result.timestamp || []).map((time, index) => {
+    const adjustedClose=finiteNumber(adjusted[index]), rawClose=finiteNumber(quote.close?.[index]);
+    const close=adjustedClose>0?adjustedClose:rawClose>0?rawClose:null;
+    return {time,close,volume:finiteNumber(quote.volume?.[index])};
+  }).filter(row => Number.isFinite(row.close) && row.close > 0);
+  if (rows.length < 160) throw new Error('有效历史数据不足，暂时无法计算趋势概率');
+  const meta = result.meta || {};
+  return { symbol, name:CN_NAMES[symbol] || meta.longName || meta.shortName || symbol, rows };
+}
+
+function signalAt(rows, benchmarkMap, index, horizon) {
+  const price = rows[index]?.close;
+  const ma5 = meanAt(rows,index,5), ma20 = meanAt(rows,index,20), ma60 = meanAt(rows,index,60);
+  if (![price,ma5,ma20,ma60].every(Number.isFinite)) return null;
+  const momentum20 = percentChange(rows[index-20]?.close,price);
+  const momentum60 = percentChange(rows[index-60]?.close,price);
+  const benchmarkNow = benchmarkMap.get(rows[index].time), benchmark20 = benchmarkMap.get(rows[index-20]?.time);
+  if (![momentum20,momentum60,benchmarkNow,benchmark20].every(Number.isFinite)) return null;
+  const relative20 = momentum20 - percentChange(benchmark20,benchmarkNow);
+  const dailyReturns = rows.slice(index-20,index+1).slice(1).map((row,i)=>percentChange(rows[index-20+i].close,row.close));
+  const volatility = standardDeviation(dailyReturns);
+  const volume5 = meanAt(rows,index,5,'volume'), volume20 = meanAt(rows,index,20,'volume');
+  const volumeRatio = volume5 && volume20 ? volume5 / volume20 : 1;
+  const shortTrend = percentChange(ma20,ma5), mediumTrend = percentChange(ma60,ma20);
+  const weights = horizon === 5
+    ? {short:2.6,medium:.8,mom20:1.0,mom60:.15,relative:1.4,volume:7,volatility:1.7}
+    : horizon === 20
+      ? {short:1.7,medium:1.8,mom20:.55,mom60:.28,relative:1.7,volume:4,volatility:1.35}
+      : {short:.7,medium:2.7,mom20:.2,mom60:.55,relative:1.2,volume:2,volatility:1.05};
+  const raw = 50 + shortTrend*weights.short + mediumTrend*weights.medium + momentum20*weights.mom20 +
+    momentum60*weights.mom60 + relative20*weights.relative + (volumeRatio-1)*weights.volume - Math.max(0,volatility-2)*weights.volatility;
+  return {score:clamp(raw),price,ma5,ma20,ma60,momentum20,momentum60,relative20,volatility,volumeRatio};
+}
+
+function directionFor(probability) {
+  if (probability >= 60) return '偏强';
+  if (probability >= 54) return '略偏强';
+  if (probability <= 40) return '偏弱';
+  if (probability <= 46) return '略偏弱';
+  return '震荡';
+}
+
+function analyzeHorizon(rows, benchmarkMap, horizon) {
+  const currentIndex = rows.length - 1;
+  const current = signalAt(rows,benchmarkMap,currentIndex,horizon);
+  if (!current) throw new Error('当前交易日缺少可比较的市场基准数据');
+  const observations = [];
+  for (let index = 80; index < currentIndex - horizon; index += Math.max(1,Math.floor(horizon/5))) {
+    const signal = signalAt(rows,benchmarkMap,index,horizon);
+    const future = rows[index+horizon];
+    const benchmarkStart = benchmarkMap.get(rows[index].time), benchmarkEnd = benchmarkMap.get(future?.time);
+    if (!signal || !future || !Number.isFinite(benchmarkStart) || !Number.isFinite(benchmarkEnd)) continue;
+    const stockReturn = percentChange(rows[index].close,future.close) - .2;
+    const benchmarkReturn = percentChange(benchmarkStart,benchmarkEnd);
+    observations.push({score:signal.score,stockReturn,excess:stockReturn-benchmarkReturn});
+  }
+  if (observations.length < 20) throw new Error('可用于历史验证的样本不足');
+  let similar = observations.filter(item => Math.abs(item.score-current.score) <= 10);
+  if (similar.length < 20) similar = observations.filter(item => Math.abs(item.score-current.score) <= 15);
+  if (similar.length < 15) similar = [...observations].sort((a,b)=>Math.abs(a.score-current.score)-Math.abs(b.score-current.score)).slice(0,Math.min(30,observations.length));
+  const positiveProbability = similar.filter(item=>item.stockReturn>0).length/similar.length*100;
+  const outperformProbability = similar.filter(item=>item.excess>0).length/similar.length*100;
+  const classified = observations.filter(item=>item.score>=55||item.score<=45);
+  const correct = classified.filter(item=>(item.score>=55&&item.excess>0)||(item.score<=45&&item.excess<=0)).length;
+  const validationAccuracy = classified.length ? correct/classified.length*100 : null;
+  const conviction = Math.abs(outperformProbability-50);
+  const confidence = similar.length>=35&&conviction>=10&&validationAccuracy>=58?'较高':similar.length>=20&&conviction>=6&&validationAccuracy>=52?'中等':'较低';
+  const bullish = outperformProbability >= 50;
+  return {
+    days:horizon, score:Math.round(current.score), direction:directionFor(outperformProbability), confidence,
+    positiveProbability:Number(positiveProbability.toFixed(1)), outperformProbability:Number(outperformProbability.toFixed(1)),
+    expectedReturn:Number(percentile(similar.map(x=>x.stockReturn),.5).toFixed(1)),
+    returnLow:Number(percentile(similar.map(x=>x.stockReturn),.25).toFixed(1)),
+    returnHigh:Number(percentile(similar.map(x=>x.stockReturn),.75).toFixed(1)),
+    sampleSize:similar.length, validationSamples:classified.length,
+    validationAccuracy:validationAccuracy===null?null:Number(validationAccuracy.toFixed(1)),
+    invalidation:horizon===5
+      ? (bullish?'收盘价跌破20日平均价格且相对强度转弱':'收盘价重新站上20日平均价格且成交改善')
+      : horizon===20
+        ? (bullish?'20日平均价格跌到60日平均价格下方':'20日平均价格重新高于60日平均价格')
+        : (bullish?'价格跌破60日平均价格且60日动量转负':'价格站稳60日平均价格且60日动量转正'),
+    factors:{fiveDayAverage:current.ma5,twentyDayAverage:current.ma20,sixtyDayAverage:current.ma60,
+      twentyDayMomentum:current.momentum20,sixtyDayMomentum:current.momentum60,
+      relativeStrength:current.relative20,twentyDayVolatility:current.volatility,volumeRatio:current.volumeRatio}
+  };
+}
+
+async function buildPrediction(rawSymbol) {
+  const [stock,benchmark] = await Promise.all([getDailySeries(rawSymbol),getDailySeries('000001.SS')]);
+  const benchmarkMap = new Map(benchmark.rows.map(row=>[row.time,row.close]));
+  const commonTimes = stock.rows.map(row=>row.time).filter(time=>benchmarkMap.has(time));
+  const latestCommonTime = commonTimes.at(-1);
+  if (!latestCommonTime) throw new Error('股票与上证综合指数没有可比较的交易日');
+  const comparableRows = stock.rows.filter(row=>row.time<=latestCommonTime);
+  const last = comparableRows.at(-1);
+  return {
+    symbol:stock.symbol, code:stock.symbol.slice(0,6), name:stock.name, currentPrice:last.close,
+    dataThrough:new Date(last.time*1000).toISOString().slice(0,10), benchmark:'上证综合指数', historyDays:comparableRows.length,
+    horizons:[5,20,60].map(days=>analyzeHorizon(comparableRows,benchmarkMap,days)),
+    methodology:'使用最近两年日线，在每个历史时点只使用当时可见的均价、动量、波动、成交量和相对上证综合指数强弱，寻找与当前条件相似的样本。收益已扣除0.2%模拟摩擦成本。'
+  };
+}
+
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.4.0', aiConfigured:Boolean(AI_API_KEY) }));
 app.get('/api/session', (req, res) => {
   const session = sessions.get(cookies(req).allen_session);
   const valid = Boolean(session && session.expires > Date.now());
@@ -337,6 +477,32 @@ app.get('/api/stock/:symbol', auth, async (req, res) => {
   try {
     res.json(await getStockData(req.params.symbol));
   } catch (error) { res.status(502).json({ error: '暂时无法获取该股票的真实行情', detail: error.message }); }
+});
+
+app.post('/api/prediction', auth, async (req,res) => {
+  try {
+    const result = await buildPrediction(req.body.symbol);
+    if (pool) {
+      await pool.query('INSERT INTO prediction_runs(user_id,symbol,name,result_json) VALUES($1,$2,$3,$4)',[req.user.id,result.symbol,result.name,JSON.stringify(result)]);
+    } else {
+      memoryPredictions.unshift({userId:String(req.user.id),symbol:result.symbol,name:result.name,result,createdAt:new Date().toISOString()});
+      if (memoryPredictions.length > 200) memoryPredictions.length = 200;
+    }
+    res.json(result);
+  } catch (error) {
+    res.status(502).json({error:error.message || '趋势预测暂时不可用'});
+  }
+});
+
+app.get('/api/predictions/recent', auth, async (req,res) => {
+  const symbol = req.query.symbol ? normalizeSymbol(req.query.symbol) : '';
+  if (pool) {
+    const params=[req.user.id], filter=symbol?' AND symbol=$2':'';
+    if(symbol)params.push(symbol);
+    const rows=(await pool.query(`SELECT id,symbol,name,result_json AS result,created_at AS "createdAt" FROM prediction_runs WHERE user_id=$1${filter} ORDER BY created_at DESC LIMIT 8`,params)).rows;
+    return res.json({predictions:rows});
+  }
+  res.json({predictions:memoryPredictions.filter(item=>item.userId===String(req.user.id)&&(!symbol||item.symbol===symbol)).slice(0,8)});
 });
 
 app.get('/api/ai/status', auth, (_req,res) => res.json({ configured:Boolean(AI_API_KEY), provider:AI_BASE_URL.includes('deepseek')?'DeepSeek':'兼容模型', model:AI_MODEL }));
