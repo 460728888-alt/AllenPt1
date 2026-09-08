@@ -1,0 +1,14 @@
+{
+  "name": "allen-stock-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check app.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

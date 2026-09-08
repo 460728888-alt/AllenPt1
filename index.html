@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b172a">
+  <title>Allen股票分析1.0</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <section id="login" class="login-screen">
+    <form id="loginForm" class="login-card">
+      <div class="logo">A</div>
+      <p class="eyebrow">PRIVATE INVESTMENT INTELLIGENCE</p>
+      <h1>Allen股票分析1.0</h1>
+      <p class="muted">你的私人 AI 投资研究助手</p>
+      <label>账号<input id="username" value="allen" autocomplete="username"></label>
+      <label>密码<input id="password" type="password" autocomplete="current-password"></label>
+      <button class="primary wide" type="submit">进入研究系统</button>
+      <p id="loginError" class="error"></p>
+    </form>
+  </section>
+
+  <div id="shell" class="shell hidden">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo small">A</span><div><b>Allen股票分析</b><small>PRIVATE AI RESEARCH</small></div></div>
+      <nav id="nav"></nav>
+      <div class="sidebar-foot"><div class="status-dot"></div><span>真实行情接口已启用</span><button id="logoutBtn">退出</button></div>
+    </aside>
+    <main>
+      <header><button id="menuBtn" class="menu">☰</button><div><p id="breadcrumb" class="eyebrow">OVERVIEW</p><h1 id="pageTitle">今日概览</h1></div><div class="header-actions"><span id="clock"></span><button class="icon-btn" data-go="search">⌕</button></div></header>
+      <div id="content" class="content"></div>
+    </main>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

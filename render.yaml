@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: allen-stock-web-v1
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_USERNAME
+        value: allen
+      - key: APP_PASSWORD
+        sync: false
+
