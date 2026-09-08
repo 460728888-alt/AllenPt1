@@ -14,6 +14,8 @@ const AI_BASE_URL = (process.env.AI_BASE_URL || 'https://api.deepseek.com').repl
 const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
+const memoryAnnouncements = [{id:1,slug:'screen-expanded-v1-2',title:'AI 智能选股范围已扩大',content:'智能选股已从固定 29 只样本扩大到约 1200 只成交较活跃的沪深 A 股。投资周期和风险偏好现在会真正影响筛选结果。',level:'更新',active:true,created_at:new Date().toISOString()}];
+const memoryAnnouncementReads = new Map();
 const aiUsage = new Map();
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5 }) : null;
 const CN_NAMES = {
@@ -24,9 +26,13 @@ const CN_NAMES = {
   '601899.SS':'紫金矿业','600900.SS':'长江电力','601088.SS':'中国神华','000725.SZ':'京东方A','002475.SZ':'立讯精密',
   '300308.SZ':'中际旭创','002230.SZ':'科大讯飞','600887.SS':'伊利股份','601012.SS':'隆基绿能','688041.SS':'海光信息'
 };
-const A_STOCK_UNIVERSE = Object.entries(CN_NAMES)
+const A_STOCK_FALLBACK = Object.entries(CN_NAMES)
   .filter(([symbol]) => symbol.endsWith('.SS') || symbol.endsWith('.SZ'))
   .map(([symbol, name]) => ({ symbol, name }));
+const MARKET_PAGE_SIZE = 100;
+const MARKET_SCAN_PAGES = 12;
+const MARKET_CACHE_MS = 10 * 60 * 1000;
+let marketSnapshotCache = null;
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   return `${salt}:${crypto.scryptSync(password, salt, 64).toString('hex')}`;
@@ -49,7 +55,18 @@ async function initUsers() {
     password_hash TEXT NOT NULL, role VARCHAR(10) NOT NULL DEFAULT 'user', active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS announcements (
+    id BIGSERIAL PRIMARY KEY, slug VARCHAR(80) UNIQUE, title VARCHAR(120) NOT NULL, content TEXT NOT NULL,
+    level VARCHAR(20) NOT NULL DEFAULT '通知', active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS announcement_reads (
+    announcement_id BIGINT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (announcement_id,user_id)
+  )`);
   await pool.query(`INSERT INTO users (username,display_name,password_hash,role) VALUES ($1,'Allen',$2,'admin') ON CONFLICT (username) DO NOTHING`,[USERNAME,adminHash]);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('screen-expanded-v1-2','AI 智能选股范围已扩大','智能选股已从固定 29 只样本扩大到约 1200 只成交较活跃的沪深 A 股。投资周期和风险偏好现在会真正影响筛选结果。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -88,6 +105,62 @@ async function yahooJson(url) {
   const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 AllenStock/1.0' } });
   if (!response.ok) throw new Error(`market data ${response.status}`);
   return response.json();
+}
+
+const finiteNumber = value => Number.isFinite(Number(value)) ? Number(value) : null;
+const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, value));
+
+function marketSymbol(code) {
+  if (/^(?:600|601|603|605|688|689)/.test(code)) return `${code}.SS`;
+  if (/^(?:000|001|002|003|300|301)/.test(code)) return `${code}.SZ`;
+  return '';
+}
+
+async function getLiquidAMarketSnapshot() {
+  if (marketSnapshotCache && Date.now() - marketSnapshotCache.time < MARKET_CACHE_MS) return marketSnapshotCache;
+  const base = `https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?num=${MARKET_PAGE_SIZE}&sort=amount&asc=0&node=hs_a&symbol=&_s_r_a=page&page=`;
+  const totalPromise = fetch('https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeStockCount?node=hs_a',{headers:{Referer:'https://finance.sina.com.cn/','User-Agent':'Mozilla/5.0 AllenStock/1.2'},signal:AbortSignal.timeout(25000)})
+    .then(async response => response.ok ? (Number(JSON.parse(await response.text())) || null) : null).catch(() => null);
+  const pages = await Promise.allSettled(Array.from({length:MARKET_SCAN_PAGES}, (_, index) =>
+    fetch(`${base}${index + 1}`, { headers:{Referer:'https://finance.sina.com.cn/','User-Agent':'Mozilla/5.0 AllenStock/1.2'}, signal:AbortSignal.timeout(25000) })
+      .then(response => { if (!response.ok) throw new Error(`market snapshot ${response.status}`); return response.json(); })
+  ));
+  const successful = pages.filter(item => item.status === 'fulfilled').map(item => item.value);
+  const rows = successful.flatMap(data => Array.isArray(data) ? data : []).map(item => {
+    const code = String(item.code || '');
+    return {
+      symbol:marketSymbol(code), code, name:String(item.name || code), price:finiteNumber(item.trade), changePct:finiteNumber(item.changepercent),
+      volume:finiteNumber(item.volume), amount:finiteNumber(item.amount), turnover:finiteNumber(item.turnoverratio), pe:finiteNumber(item.per),
+      volumeRatio:null, high:finiteNumber(item.high), low:finiteNumber(item.low), open:finiteNumber(item.open),
+      previous:finiteNumber(item.settlement), marketCap:finiteNumber(item.mktcap) === null ? null : finiteNumber(item.mktcap) * 10000,
+      floatMarketCap:finiteNumber(item.nmc) === null ? null : finiteNumber(item.nmc) * 10000, pb:finiteNumber(item.pb)
+    };
+  }).filter(item => item.symbol && item.price >= 2 && item.amount >= 2e7 && item.marketCap >= 1e9 && !/(?:\*?ST|退市)/i.test(item.name));
+  if (rows.length < 300) throw new Error('全市场行情源暂时返回不足');
+  const total = await totalPromise || rows.length;
+  marketSnapshotCache = {time:Date.now(), rows, total, pages:successful.length};
+  return marketSnapshotCache;
+}
+
+function scoreMarketStock(stock, horizon, risk) {
+  const absChange = Math.abs(stock.changePct || 0);
+  const size = clamp((Math.log10(Math.max(stock.marketCap || 1e9, 1e9)) - 9) * 24);
+  const liquidity = clamp((Math.log10(Math.max(stock.amount || 2e7, 2e7)) - 7.3) * 32);
+  const activity = clamp(((stock.turnover || 0) / 10) * 100);
+  const volumeBoost = clamp(((stock.volumeRatio || 0.5) - .5) * 65);
+  const momentum = clamp(50 + (stock.changePct || 0) * 7);
+  const intraday = stock.high > stock.low ? clamp(((stock.price - stock.low) / (stock.high - stock.low)) * 100) : 50;
+  const valuation = stock.pe > 0 && stock.pe <= 80 ? clamp(100 - Math.abs(stock.pe - 25) * 1.5) : 20;
+  const bookValue = stock.pb > 0 && stock.pb <= 12 ? clamp(100 - Math.abs(stock.pb - 3) * 8) : 25;
+  const stability = clamp(100 - absChange * 10 - Math.max(0, (stock.turnover || 0) - 5) * 4);
+  let score;
+  if (horizon === '短期') score = momentum*.24 + activity*.18 + volumeBoost*.20 + intraday*.18 + liquidity*.20;
+  else if (horizon === '长期') score = size*.25 + valuation*.22 + bookValue*.16 + stability*.22 + liquidity*.15;
+  else score = momentum*.15 + intraday*.13 + liquidity*.20 + size*.16 + valuation*.18 + stability*.18;
+  if (risk === '低') score += (stability-50)*.12 + (size-50)*.08 - (activity-50)*.06 - absChange*.8;
+  else if (risk === '高') score += (activity-50)*.08 + (volumeBoost-50)*.04 + (momentum-50)*.07 - (stability-50)*.03;
+  else score += (stability-50)*.03 + (liquidity-50)*.03;
+  return Math.round(clamp(score));
 }
 
 function average(values, count) {
@@ -173,7 +246,7 @@ function stockContext(stock) {
   };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.1.0', aiConfigured:Boolean(AI_API_KEY) }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.3.0', aiConfigured:Boolean(AI_API_KEY) }));
 app.get('/api/session', (req, res) => {
   const session = sessions.get(cookies(req).allen_session);
   const valid = Boolean(session && session.expires > Date.now());
@@ -212,6 +285,41 @@ app.patch('/api/admin/users/:id',auth,admin,async(req,res)=>{
   if(action==='toggle'){if(pool)await pool.query('UPDATE users SET active=NOT active WHERE id=$1',[id]);else{const u=[...memoryUsers.values()].find(x=>String(x.id)===id);if(u)u.active=!u.active}}
   else if(action==='reset'){const p=String(req.body.password||'');if(p.length<6)return res.status(400).json({error:'密码至少6位'});const h=hashPassword(p);if(pool)await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2',[h,id]);else{const u=[...memoryUsers.values()].find(x=>String(x.id)===id);if(u)u.password_hash=h}}
   else return res.status(400).json({error:'操作无效'});res.json({ok:true});
+});
+
+app.get('/api/announcements',auth,async(req,res)=>{
+  if(pool){
+    const result=await pool.query(`SELECT a.id,a.title,a.content,a.level,a.created_at AS "createdAt" FROM announcements a
+      LEFT JOIN announcement_reads r ON r.announcement_id=a.id AND r.user_id=$1
+      WHERE a.active=TRUE AND r.announcement_id IS NULL ORDER BY a.created_at DESC`,[req.user.id]);
+    return res.json({announcements:result.rows});
+  }
+  const read=memoryAnnouncementReads.get(String(req.user.id))||new Set();
+  res.json({announcements:memoryAnnouncements.filter(a=>a.active&&!read.has(String(a.id))).map(a=>({...a,createdAt:a.created_at}))});
+});
+app.post('/api/announcements/:id/read',auth,async(req,res)=>{
+  const id=String(req.params.id);
+  if(pool)await pool.query('INSERT INTO announcement_reads(announcement_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[id,req.user.id]);
+  else{const key=String(req.user.id),read=memoryAnnouncementReads.get(key)||new Set();read.add(id);memoryAnnouncementReads.set(key,read)}
+  res.json({ok:true});
+});
+app.get('/api/admin/announcements',auth,admin,async(_req,res)=>{
+  const announcements=pool?(await pool.query(`SELECT a.id,a.title,a.content,a.level,a.active,a.created_at AS "createdAt",COUNT(r.user_id)::int AS "readCount" FROM announcements a LEFT JOIN announcement_reads r ON r.announcement_id=a.id GROUP BY a.id ORDER BY a.created_at DESC`)).rows:memoryAnnouncements.map(a=>({...a,createdAt:a.created_at,readCount:[...memoryAnnouncementReads.values()].filter(set=>set.has(String(a.id))).length}));
+  res.json({announcements});
+});
+app.post('/api/admin/announcements',auth,admin,async(req,res)=>{
+  const title=String(req.body.title||'').trim().slice(0,120),content=String(req.body.content||'').trim().slice(0,2000),level=['通知','更新','重要'].includes(req.body.level)?req.body.level:'通知';
+  if(title.length<2||content.length<2)return res.status(400).json({error:'请填写完整的通知标题和内容'});
+  if(pool)await pool.query('INSERT INTO announcements(title,content,level) VALUES($1,$2,$3)',[title,content,level]);
+  else memoryAnnouncements.unshift({id:Date.now(),title,content,level,active:true,created_at:new Date().toISOString()});
+  res.json({ok:true});
+});
+app.patch('/api/admin/announcements/:id',auth,admin,async(req,res)=>{
+  const id=String(req.params.id);
+  if(req.body.action!=='toggle')return res.status(400).json({error:'操作无效'});
+  if(pool)await pool.query('UPDATE announcements SET active=NOT active WHERE id=$1',[id]);
+  else{const item=memoryAnnouncements.find(a=>String(a.id)===id);if(item)item.active=!item.active}
+  res.json({ok:true});
 });
 
 app.get('/api/search', auth, async (req, res) => {
@@ -262,21 +370,31 @@ app.post('/api/ai/screen', auth, async (req,res) => {
     const horizon = ['短期','中期','长期'].includes(req.body.horizon) ? req.body.horizon : '中期';
     const risk = ['低','中','高'].includes(req.body.risk) ? req.body.risk : '中';
     const capital = Math.max(0,Math.min(100000000,Number(req.body.capital)||0));
-    const settled = await Promise.allSettled(A_STOCK_UNIVERSE.map(item => getStockData(item.symbol,{withNews:false})));
-    const available = settled.filter(item => item.status==='fulfilled').map(item => item.value).filter(item => Number.isFinite(item.price));
-    if (available.length < 5) throw new Error('当前可核验的 A 股行情不足，请稍后重试');
-    const riskWeight = risk==='低' ? -8 : risk==='高' ? 5 : -2;
-    const ranked = available.map(stock => ({...stock,screenScore:Math.max(0,Math.min(100,Math.round(stock.technical.score + riskWeight * stock.technical.volatility20 / 3)))}))
-      .sort((a,b)=>b.screenScore-a.screenScore).slice(0,8);
+    let snapshot;
+    try { snapshot = await getLiquidAMarketSnapshot(); }
+    catch {
+      const settled = await Promise.allSettled(A_STOCK_FALLBACK.map(item => getStockData(item.symbol,{withNews:false})));
+      const rows = settled.filter(item => item.status==='fulfilled').map(item => item.value).filter(item => Number.isFinite(item.price)).map(stock => ({
+        ...stock, amount:stock.technical.volume ? stock.technical.volume * stock.price : 0, turnover:null, pe:null, pb:null,
+        marketCap:null, volumeRatio:null, high:stock.technical.high20, low:stock.technical.low20
+      }));
+      snapshot = {rows,total:rows.length,pages:0,fallback:true};
+    }
+    const ranked = snapshot.rows.map(stock => ({...stock,screenScore:scoreMarketStock(stock,horizon,risk)}))
+      .sort((a,b)=>b.screenScore-a.screenScore).slice(0,16);
+    if (ranked.length < 5) throw new Error('当前可核验的 A 股行情不足，请稍后重试');
     const candidates = ranked.map(stock => ({
       股票名称:stock.name, 股票代码:stock.code, 当前价格:stock.price, 今日涨跌幅:stock.changePct,
-      五日均价:stock.technical.ma5, 二十日均价:stock.technical.ma20, 六十日均价:stock.technical.ma60,
-      二十日波动率:stock.technical.volatility20, 量化筛选分:stock.screenScore
+      今日成交额亿元:stock.amount ? Number((stock.amount/1e8).toFixed(2)) : null,
+      换手率百分比:stock.turnover, 市盈率:stock.pe, 市净率:stock.pb,
+      总市值亿元:stock.marketCap ? Number((stock.marketCap/1e8).toFixed(2)) : null,
+      量比:stock.volumeRatio, 日内价格位置百分比:stock.high>stock.low?Number((((stock.price-stock.low)/(stock.high-stock.low))*100).toFixed(1)):null,
+      量化筛选分:stock.screenScore
     }));
-    const system = `你是谨慎的中文 A 股研究助手。候选范围是国信金太阳中可按六位代码搜索的沪深 A 股样本。你不能连接证券账户或下单。\n仅根据提供的已核验行情候选进行比较，不新增股票，不猜测财务数据或新闻。\n输出中文，先说明这只是“有限样本候选”而非全市场扫描，然后给出3至5只优先研究对象。每只包含：代码、入选理由、主要风险、关注条件、什么情况下应放弃。最后说明组合层面的仓位与核验原则，但不得给出保证收益或全仓指令。所有移动平均线使用中文全称。`;
+    const system = `你是谨慎的中文 A 股研究助手。候选范围来自沪深 A 股中成交较活跃的扩大样本，与国信金太阳可按六位代码搜索的股票代码一致，但不连接证券账户，也不能下单。\n仅根据提供的已核验行情候选比较，不新增股票，不猜测财务数据、新闻或长期基本面。\n只输出普通中文，不使用Markdown井号或星号。先说明这是扩大样本筛选但不是全部A股逐只深度研究，然后给出3至5只优先研究对象。每只包含：代码、入选理由、主要风险、关注条件、什么情况下应放弃。最后说明组合层面的仓位与核验原则，不得保证收益或使用全仓指令。专业指标同时用通俗中文解释。`;
     const user = `用户条件：投资周期=${horizon}；风险偏好=${risk}；参考资金=${capital||'未填写'}元。\n候选数据：${JSON.stringify(candidates)}`;
     const answer = await callAi([{role:'system',content:system},{role:'user',content:user}]);
-    res.json({answer,candidates:candidates.slice(0,5),sampleSize:available.length,remaining});
+    res.json({answer,candidates:candidates.slice(0,5),sampleSize:snapshot.rows.length,marketTotal:snapshot.total,horizon,risk,capital,source:snapshot.fallback?'备用样本':'沪深A股活跃样本',remaining});
   } catch(error) {
     res.status(error.code==='AI_NOT_CONFIGURED'?503:502).json({error:error.message});
   }
