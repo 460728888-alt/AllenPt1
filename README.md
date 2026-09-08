@@ -11,6 +11,9 @@
 - 短期 / 中期 / 长期条件评分
 - 持仓与投资逻辑本机保存
 - 风险预警、未来事件、每日简报
+- DeepSeek 中文 AI 股票研究对话
+- 国信金太阳可搜索的沪深 A 股有限样本智能筛选
+- 每位用户每天最多 40 次 AI 请求，控制接口费用
 - 缺少可靠来源的财务、公司和行业数据明确标记为待接入
 
 ## 本地运行
@@ -27,7 +30,10 @@ APP_USERNAME=allen APP_PASSWORD=allen123 npm start
 - `APP_USERNAME`：登录用户名
 - `APP_PASSWORD`：登录密码（必须在 Render 中设置）
 - `DATABASE_URL`：PostgreSQL 内部连接地址，用于持久保存用户账号
+- `AI_API_KEY`：DeepSeek API 密钥，只能保存在 Render，不能上传 GitHub
+- `AI_BASE_URL`：`https://api.deepseek.com`
+- `AI_MODEL`：`deepseek-chat`
 
 ## 重要说明
 
-行情可能延迟。本项目用于研究辅助，不构成投资建议。AI 不会编造缺失的实时、财务或新闻数据。
+行情可能延迟。本项目用于研究辅助，不构成投资建议。智能选股是有限样本比较，并非全市场扫描；AI 不会编造缺失的实时、财务或新闻数据，也不会连接国信证券账户或自动下单。
