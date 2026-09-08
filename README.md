@@ -1,10 +1,10 @@
 # Allen股票分析1.0
 
-单用户私人股票研究与决策辅助 Web App。
+管理员控制的小范围私人股票研究与决策辅助 Web App。
 
 ## 当前能力
 
-- 私人登录，不开放注册
+- 管理员创建用户，不开放注册
 - 股票搜索与个人股票池
 - 真实市场价格、历史行情、均线和波动数据
 - 股票详情九大研究模块
@@ -26,6 +26,7 @@ APP_USERNAME=allen APP_PASSWORD=allen123 npm start
 
 - `APP_USERNAME`：登录用户名
 - `APP_PASSWORD`：登录密码（必须在 Render 中设置）
+- `DATABASE_URL`：PostgreSQL 内部连接地址，用于持久保存用户账号
 
 ## 重要说明
 
