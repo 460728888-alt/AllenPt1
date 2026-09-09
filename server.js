@@ -15,6 +15,7 @@ const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
 const memoryAnnouncements = [
+  {id:6,slug:'scenario-decision-v1-8',title:'AI 情景判断已上线',content:'趋势预测中心新增当前情景判断：自动识别当前更接近上涨、震荡或下跌情景，并显示触发条件和对应行动；另外两种可能折叠展示。原有页面与功能保持不变。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:5,slug:'calculator-security-v1-7',title:'盈亏计算器与账号安全功能已上线',content:'新增股票利润亏损计算器，可按个人佣金、最低佣金、印花税和过户费估算保本价、净利润、止损结果与目标卖价。管理员现在可以查看在线状态、强制用户退出并导出不含密码的备份。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:4,slug:'personal-trade-plan-v1-6',title:'个人买入与卖出价格计划已上线',content:'股票详情和我的持仓新增回调关注区间、突破确认价格、防守价格和两档止盈参考价。持仓计划会结合个人成本、数量、周期与风险偏好计算，并在登录时检查价格触发条件。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:3,slug:'research-data-v1-5',title:'真实研究数据与自动提醒已上线',content:'股票详情现已接入公司资料、主要财务指标和公司公告；个人股票池、持仓与投资逻辑支持账号云端同步，并会在登录时自动检查股票池风险。趋势中心新增市场环境与更严格的后段样本验证。',level:'更新',active:true,created_at:new Date().toISOString()},
@@ -106,6 +107,7 @@ async function initUsers() {
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('research-data-v1-5','真实研究数据与自动提醒已上线','股票详情现已接入公司资料、主要财务指标和公司公告；个人股票池、持仓与投资逻辑支持账号云端同步，并会在登录时自动检查股票池风险。趋势中心新增市场环境与更严格的后段样本验证。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('personal-trade-plan-v1-6','个人买入与卖出价格计划已上线','股票详情和我的持仓新增回调关注区间、突破确认价格、防守价格和两档止盈参考价。持仓计划会结合个人成本、数量、周期与风险偏好计算，并在登录时检查价格触发条件。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('calculator-security-v1-7','盈亏计算器与账号安全功能已上线','新增股票利润亏损计算器，可按个人佣金、最低佣金、印花税和过户费估算保本价、净利润、止损结果与目标卖价。管理员现在可以查看在线状态、强制用户退出并导出不含密码的备份。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('scenario-decision-v1-8','AI 情景判断已上线','趋势预测中心新增当前情景判断：自动识别当前更接近上涨、震荡或下跌情景，并显示触发条件和对应行动；另外两种可能折叠展示。原有页面与功能保持不变。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -572,7 +574,7 @@ async function buildPrediction(rawSymbol) {
   };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.7.0', aiConfigured:Boolean(AI_API_KEY) }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.8.0', aiConfigured:Boolean(AI_API_KEY) }));
 app.get('/api/session',async(req,res)=>{
   try{
     const token=cookies(req).allen_session;if(!token)return res.json({authenticated:false,user:null});
@@ -675,8 +677,8 @@ app.get('/api/admin/backup',auth,admin,async(_req,res)=>{
       pool.query('SELECT id,user_id,symbol,name,result_json,created_at FROM prediction_runs ORDER BY id'),
       pool.query('SELECT id,user_id,alert_key,symbol,title,content,level,read_at,created_at FROM user_alerts ORDER BY id')
     ]);
-    backup={version:'1.7.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows};
-  }else backup={version:'1.7.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts};
+    backup={version:'1.8.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows};
+  }else backup={version:'1.8.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts};
   res.setHeader('Content-Disposition',`attachment; filename="allen-stock-backup-${createdAt.slice(0,10)}.json"`);res.json(backup);
 });
 

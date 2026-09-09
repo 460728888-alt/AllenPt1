@@ -101,9 +101,27 @@ function periodCards(){const t=state.stock.technical;return `<div class="grid g3
 
 function probabilityTone(value){return value>=60?'green':value>=54?'blue':value<=40?'red':value<=46?'orange':'yellow'}
 function signed(value){return `${value>=0?'+':''}${fmt(value,1)}%`}
+function scenarioDecisionHtml(result){
+ const short=result.horizons.find(item=>item.days===5)||result.horizons[0],f=short?.factors||{};
+ const price=result.currentPrice,average=f.twentyDayAverage,relative=f.relativeStrength,volume=f.volumeRatio,probability=short?.outperformProbability;
+ const current=probability>=54&&price>=average?'up':probability<=46&&price<average?'down':'sideways';
+ const scenarios={
+  up:{title:'上涨情景',icon:'↗',tone:'green',trigger:`收盘价站稳最近20日平均价格 ${fmt(average)}，且近5日成交量达到20日均量的1倍以上。`,action:'条件确认后进入重点关注，未确认前不追涨。'},
+  sideways:{title:'震荡情景',icon:'↔',tone:'yellow',trigger:`价格围绕最近20日平均价格 ${fmt(average)} 运行，未来5日跑赢市场的历史概率仍在46%—54%附近。`,action:'继续等待，观察价格选择方向，减少没有优势的频繁操作。'},
+  down:{title:'下跌情景',icon:'↘',tone:'red',trigger:`收盘价跌破最近20日平均价格 ${fmt(average)}，且相对市场强弱继续为负。`,action:'暂停新增关注；已有持仓重新检查防守价格和原投资逻辑。'}
+ };
+ const active=scenarios[current],others=Object.entries(scenarios).filter(([key])=>key!==current);
+ const evidence=[
+  ['价格位置',price>=average?`现价高于20日平均价 ${fmt(average)}`:`现价低于20日平均价 ${fmt(average)}`],
+  ['历史概率',`未来5日跑赢市场概率 ${fmt(probability,1)}%`],
+  ['成交确认',volume>=1?`近期成交量比 ${fmt(volume,2)} 倍，已达到1倍`:`近期成交量比 ${fmt(volume,2)} 倍，尚未达到1倍`]
+ ];
+ return `<section class="card scenario-decision ${active.tone}"><div class="section-head"><div><p class="eyebrow">当前情景判断 · 未来5个交易日</p><h2>${active.icon} 当前更接近：${active.title}</h2></div><span class="badge ${active.tone}">自动判断</span></div><div class="scenario-evidence">${evidence.map(([name,value])=>`<div><small>${name}</small><b>${esc(value)}</b></div>`).join('')}</div><div class="scenario-action"><div><small>触发条件</small><p>${esc(active.trigger)}</p></div><div><small>对应行动</small><p><b>${esc(active.action)}</b></p></div></div><p class="sample-line">判断依据：未来5日历史条件概率、价格相对20日平均位置、相对市场强弱 ${signed(relative)} 与成交量变化。只用于触发复核，不自动交易。</p></section><div class="scenario-alternatives section"><h3>查看另外两种可能</h3>${others.map(([,item])=>`<details class="scenario-details ${item.tone}"><summary><span>${item.icon} ${item.title}</span><span class="muted">点击展开</span></summary><div><small>触发条件</small><p>${esc(item.trigger)}</p><small>对应行动</small><p><b>${esc(item.action)}</b></p></div></details>`).join('')}</div>`;
+}
 function predictionResult(result){
  const factors=result.horizons[1]?.factors||result.horizons[0]?.factors||{};
  return `<div class="card prediction-hero"><div><p class="eyebrow">${esc(result.symbol)} · 数据截至 ${esc(result.dataThrough)}</p><h2>${esc(result.name)} 趋势概率</h2><p>当前参考价 <b>${fmt(result.currentPrice)}</b> · 对照基准：${esc(result.benchmark)}</p></div><div><span class="badge blue">${result.historyDays} 个交易日数据</span> <span class="badge ${result.market?.regime==='上升环境'?'green':result.market?.regime==='偏弱环境'?'red':'yellow'}">市场：${esc(result.market?.regime||'待判断')}</span></div></div>
+ ${scenarioDecisionHtml(result)}
  <div class="grid g3 section">${result.horizons.map(item=>`<div class="card horizon-card ${probabilityTone(item.outperformProbability)}"><div class="section-head"><div><span class="muted">未来</span><div class="horizon-days">${item.days}个交易日</div></div><span class="badge ${probabilityTone(item.outperformProbability)}">${item.direction}</span></div><div class="probability"><b>${fmt(item.outperformProbability,1)}%</b><span>跑赢市场基准的历史条件概率</span></div><div class="probability-bar"><span style="width:${item.outperformProbability}%"></span></div><div class="prediction-stats"><div><small>上涨概率</small><b>${fmt(item.positiveProbability,1)}%</b></div><div><small>相似样本中位数</small><b class="${item.expectedReturn>=0?'up':'down'}">${signed(item.expectedReturn)}</b></div><div><small>中间一半范围</small><b>${signed(item.returnLow)} 至 ${signed(item.returnHigh)}</b></div><div><small>可信程度</small><b>${item.confidence}</b></div></div><p class="invalidation"><b>判断失效观察：</b>${esc(item.invalidation)}</p><p class="sample-line">相似样本 ${item.sampleSize} 个 · 历史验证 ${item.validationSamples} 个 · 命中率 ${fmt(item.validationAccuracy,1)}%</p></div>`).join('')}</div>
  <div class="grid g2 section"><div class="card"><h2>当前条件（全部中文）</h2>${[['最近5日平均价格',factors.fiveDayAverage,''],['最近20日平均价格',factors.twentyDayAverage,''],['最近60日平均价格',factors.sixtyDayAverage,''],['20日价格变化',factors.twentyDayMomentum,'%'],['60日价格变化',factors.sixtyDayMomentum,'%'],['相对市场强弱',factors.relativeStrength,'%'],['20日波动程度',factors.twentyDayVolatility,'%'],['近5日/20日成交量比',factors.volumeRatio,'倍']].map(([name,value,unit])=>`<div class="factor-row"><span>${name}</span><b>${fmt(value,unit==='倍'?2:1)}${unit}</b></div>`).join('')}</div><div class="card"><h2>市场环境与方法</h2><div class="factor-row"><span>当前市场状态</span><b>${esc(result.market?.regime||'待判断')}</b></div><div class="factor-row"><span>市场20日价格变化</span><b>${signed(result.market?.twentyDayMomentum)}</b></div><p class="note section">${esc(result.methodology)}</p><p>50%附近表示历史上没有明显方向优势；样本越多、概率离50%越远，参考价值才相对更高。</p><p>命中率只使用历史后30%的验证区间，减少“用同一批数据自我证明”的误差。</p><p class="warning">⚠ 概率不代表保证。重大公告、政策、停牌和市场突变可能让历史规律失效。</p></div></div>`;
 }
