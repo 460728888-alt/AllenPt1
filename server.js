@@ -15,6 +15,7 @@ const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
 const memoryAnnouncements = [
+  {id:4,slug:'personal-trade-plan-v1-6',title:'个人买入与卖出价格计划已上线',content:'股票详情和我的持仓新增回调关注区间、突破确认价格、防守价格和两档止盈参考价。持仓计划会结合个人成本、数量、周期与风险偏好计算，并在登录时检查价格触发条件。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:3,slug:'research-data-v1-5',title:'真实研究数据与自动提醒已上线',content:'股票详情现已接入公司资料、主要财务指标和公司公告；个人股票池、持仓与投资逻辑支持账号云端同步，并会在登录时自动检查股票池风险。趋势中心新增市场环境与更严格的后段样本验证。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:2,slug:'trend-center-v1-4',title:'趋势预测中心已上线',content:'新增未来5、20、60个交易日趋势研究：显示历史相似条件下的上涨概率、跑赢市场基准概率、收益区间、样本数与历史验证命中率。概率是历史统计，不是涨跌保证。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:1,slug:'screen-expanded-v1-2',title:'AI 智能选股范围已扩大',content:'智能选股已从固定 29 只样本扩大到约 1200 只成交较活跃的沪深 A 股。投资周期和风险偏好现在会真正影响筛选结果。',level:'更新',active:true,created_at:new Date().toISOString()}
@@ -93,6 +94,7 @@ async function initUsers() {
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('screen-expanded-v1-2','AI 智能选股范围已扩大','智能选股已从固定 29 只样本扩大到约 1200 只成交较活跃的沪深 A 股。投资周期和风险偏好现在会真正影响筛选结果。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('trend-center-v1-4','趋势预测中心已上线','新增未来5、20、60个交易日趋势研究：显示历史相似条件下的上涨概率、跑赢市场基准概率、收益区间、样本数与历史验证命中率。概率是历史统计，不是涨跌保证。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('research-data-v1-5','真实研究数据与自动提醒已上线','股票详情现已接入公司资料、主要财务指标和公司公告；个人股票池、持仓与投资逻辑支持账号云端同步，并会在登录时自动检查股票池风险。趋势中心新增市场环境与更严格的后段样本验证。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('personal-trade-plan-v1-6','个人买入与卖出价格计划已上线','股票详情和我的持仓新增回调关注区间、突破确认价格、防守价格和两档止盈参考价。持仓计划会结合个人成本、数量、周期与风险偏好计算，并在登录时检查价格触发条件。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -135,6 +137,43 @@ async function yahooJson(url) {
 
 const finiteNumber = value => Number.isFinite(Number(value)) ? Number(value) : null;
 const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, value));
+const price2 = value => Number(Number(value).toFixed(2));
+
+function buildTradePlan(stock, preferences = {}) {
+  const t=stock.technical,price=stock.price;
+  const horizon=['短期','中期','长期'].includes(preferences.horizon)?preferences.horizon:'中期';
+  const risk=['低','中','高'].includes(preferences.risk)?preferences.risk:'中';
+  const cost=finiteNumber(preferences.cost),qty=Math.max(0,Math.floor(finiteNumber(preferences.qty)||0));
+  const supports=[t.low20,t.ma60,t.ma20].filter(value=>Number.isFinite(value)&&value<=price);
+  const support=supports.length?Math.max(...supports):Math.min(t.low20,t.ma20,price);
+  const dailyMove=clamp(t.volatility20||2,0.8,6);
+  const horizonFactor=horizon==='短期'?.85:horizon==='长期'?1.35:1;
+  const riskFactor=risk==='低'?.82:risk==='高'?1.22:1;
+  const stopPct=clamp(dailyMove*1.65*horizonFactor*riskFactor,risk==='低'?2:2.8,risk==='高'?9:7);
+  const entryHalfPct=clamp(dailyMove*.28,.35,1.4);
+  const entryLow=price2(support*(1-entryHalfPct/100));
+  const entryHigh=price2(support*(1+entryHalfPct/100));
+  const entryMid=(entryLow+entryHigh)/2;
+  const structuralStop=entryMid*(1-stopPct/100);
+  const trailingCandidate=t.ma20*(1-clamp(dailyMove*.55*horizonFactor*riskFactor,.6,3.8)/100);
+  let defense=cost&&price>cost?Math.max(structuralStop,trailingCandidate):structuralStop;
+  defense=Math.min(defense,price*.99);
+  defense=price2(defense);
+  const basis=cost||entryMid,riskPerShare=cost?Math.max(.01,cost*stopPct/100):Math.max(.01,basis-defense);
+  const target1=price2(basis+riskPerShare*1.5),target2=price2(basis+riskPerShare*2.5);
+  const breakout=price2(t.high20*1.003);
+  const inEntry=price>=entryLow&&price<=entryHigh,target1Reached=price>=target1,target2Reached=price>=target2;
+  const status=price<=defense?'防守价已触发，优先重新评估':cost&&target2Reached?'已达到第二止盈观察区':cost&&target1Reached?'已达到第一止盈观察区':cost?'持有并观察价格条件':inEntry&&t.score>=55?'进入回调关注区间':price>=breakout&&t.score>=60?'突破后等待收盘确认':'等待价格条件';
+  return {
+    horizon,risk,status,dataThrough:stock.marketTime?new Date(stock.marketTime*1000).toISOString().slice(0,10):null,
+    currentPrice:price,support:price2(support),pullbackEntry:{low:entryLow,high:entryHigh},breakoutPrice:breakout,
+    defensePrice:defense,target1,target2,riskReward1:Number(((target1-basis)/riskPerShare).toFixed(1)),riskReward2:Number(((target2-basis)/riskPerShare).toFixed(1)),
+    cost,qty,maxEstimatedLoss:cost&&qty?price2(Math.max(0,(cost-defense)*qty)):null,
+    estimatedOutcomeAtDefense:cost&&qty?price2((defense-cost)*qty):null,
+    conditions:{trendConfirmed:t.ma5>t.ma20,aboveMediumAverage:price>t.ma20,nearPullback:inEntry,breakoutConfirmed:price>=breakout,defenseTriggered:price<=defense,target1Reached,target2Reached},
+    basis:'根据最近20日价格区间、5/20/60日平均价格、20日波动程度和个人持仓成本计算；每天随行情更新。'
+  };
+}
 
 function marketSymbol(code) {
   if (/^(?:600|601|603|605|688|689)/.test(code)) return `${code}.SS`;
@@ -225,7 +264,7 @@ async function getStockData(rawSymbol, options = {}) {
   const volatility20 = standardDeviation(returns20);
   const momentum = price && ma20 ? ((price / ma20) - 1) * 100 : 0;
   const score = Math.max(0, Math.min(100, Math.round(60 + momentum * 2 + (ma5 > ma20 ? 8 : -5) + (ma20 > ma60 ? 7 : -4) - Math.max(0, volatility20 - 3) * 2)));
-  return {
+  const stock = {
     symbol, code:symbol.slice(0,6), name: CN_NAMES[symbol] || meta.longName || meta.shortName || symbol,
     currency: meta.currency || '', exchange: meta.exchangeName || '', price, previous, changePct,
     marketTime: meta.regularMarketTime || null,
@@ -233,6 +272,8 @@ async function getStockData(rawSymbol, options = {}) {
     history: closes.slice(-90).map((close, i) => ({ close, time: timestamps.slice(-closes.slice(-90).length)[i] || null })),
     news: (search.news || []).map(x => ({ title: x.title, publisher: x.publisher, link: x.link, published: x.providerPublishTime }))
   };
+  stock.tradePlan=buildTradePlan(stock);
+  return stock;
 }
 
 function eastmoneyCodes(symbol) {
@@ -241,7 +282,7 @@ function eastmoneyCodes(symbol) {
 }
 
 async function publicJson(url, timeout=15000) {
-  const response=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 AllenStock/1.5','Referer':'https://data.eastmoney.com/'},signal:AbortSignal.timeout(timeout)});
+  const response=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 AllenStock/1.6','Referer':'https://data.eastmoney.com/'},signal:AbortSignal.timeout(timeout)});
   if(!response.ok)throw new Error(`公开数据源返回 ${response.status}`);
   return response.json();
 }
@@ -305,7 +346,7 @@ function cleanUserState(body={}) {
   const cleanItems=(items,max)=>Array.isArray(items)?items.slice(0,max).map(item=>{
     const result={};
     for(const [key,value] of Object.entries(item||{})){
-      if(['symbol','code','name','date','cycle','reason','risk','thesis'].includes(key))result[key]=String(value??'').slice(0,key==='reason'||key==='risk'||key==='thesis'?1000:120);
+      if(['symbol','code','name','date','cycle','riskPreference','reason','risk','thesis'].includes(key))result[key]=String(value??'').slice(0,key==='reason'||key==='risk'||key==='thesis'?1000:120);
       if(['buy','qty'].includes(key)&&Number.isFinite(Number(value)))result[key]=Number(value);
     }
     return result;
@@ -500,7 +541,7 @@ async function buildPrediction(rawSymbol) {
   };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.5.0', aiConfigured:Boolean(AI_API_KEY) }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.6.0', aiConfigured:Boolean(AI_API_KEY) }));
 app.get('/api/session', (req, res) => {
   const session = sessions.get(cookies(req).allen_session);
   const valid = Boolean(session && session.expires > Date.now());
@@ -540,13 +581,20 @@ app.post('/api/alerts/:id/read',auth,async(req,res)=>{
   res.json({ok:true});
 });
 app.post('/api/monitor',auth,async(req,res)=>{
-  const userState=await getUserState(req.user.id),watch=(userState?.watch||[]).slice(0,10),day=new Date().toISOString().slice(0,10);
-  const checked=await Promise.allSettled(watch.map(item=>getStockData(item.symbol,{withNews:false})));
+  const userState=await getUserState(req.user.id),watch=(userState?.watch||[]).slice(0,10),portfolio=(userState?.portfolio||[]).slice(0,20),day=new Date().toISOString().slice(0,10);
+  const symbols=[...new Map([...watch,...portfolio].map(item=>[normalizeSymbol(item.symbol),item])).values()];
+  const checked=await Promise.allSettled(symbols.map(item=>getStockData(item.symbol,{withNews:false})));
   for(const result of checked){
     if(result.status!=='fulfilled')continue;
     const stock=result.value,t=stock.technical;
     if(t.score<45)await addUserAlert(req.user.id,{key:`risk:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}趋势风险上升`,content:`当前技术条件评分为${t.score}分，短期走势偏弱。请检查是否跌破关键平均价格，并重新核对原投资逻辑。`,level:'风险'});
     if(stock.price>=t.high20*.99)await addUserAlert(req.user.id,{key:`high:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}接近近期高位`,content:`当前价格接近最近20个交易日高位，追高风险可能上升。建议结合成交量、估值和持仓计划判断。`,level:'提醒'});
+    const holding=portfolio.find(item=>normalizeSymbol(item.symbol)===stock.symbol);
+    const plan=buildTradePlan(stock,{cost:holding?.buy,qty:holding?.qty,horizon:holding?.cycle||'中期',risk:holding?.riskPreference||'中'});
+    if(holding&&stock.price<=plan.defensePrice)await addUserAlert(req.user.id,{key:`defense:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}已触及防守价格`,content:`当前参考价${price2(stock.price)}元，已达到或低于计划防守价${plan.defensePrice}元。请核对行情、公告和原投资逻辑后决定是否降低风险。`,level:'风险'});
+    if(holding&&stock.price>=plan.target2)await addUserAlert(req.user.id,{key:`target2:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}已达到第二止盈观察区`,content:`当前参考价${price2(stock.price)}元，已达到第二止盈参考价${plan.target2}元。可按自己的计划检查是否分批锁定收益。`,level:'提醒'});
+    else if(holding&&stock.price>=plan.target1)await addUserAlert(req.user.id,{key:`target1:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}已达到第一止盈观察区`,content:`当前参考价${price2(stock.price)}元，已达到第一止盈参考价${plan.target1}元。请结合趋势和仓位计划判断。`,level:'提醒'});
+    if(!holding&&plan.conditions.nearPullback&&t.score>=55)await addUserAlert(req.user.id,{key:`entry:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}进入回调关注区间`,content:`当前参考价${price2(stock.price)}元，回调关注区间为${plan.pullbackEntry.low}—${plan.pullbackEntry.high}元。请先确认趋势、财务和公告条件，不代表必须买入。`,level:'提醒'});
   }
   res.json({ok:true,checked:checked.filter(item=>item.status==='fulfilled').length});
 });
@@ -620,6 +668,13 @@ app.get('/api/stock/:symbol', auth, async (req, res) => {
   try {
     res.json(await getStockData(req.params.symbol));
   } catch (error) { res.status(502).json({ error: '暂时无法获取该股票的真实行情', detail: error.message }); }
+});
+
+app.get('/api/trade-plan/:symbol',auth,async(req,res)=>{
+  try{
+    const stock=await getStockData(req.params.symbol,{withNews:false});
+    res.json(buildTradePlan(stock,{cost:req.query.cost,qty:req.query.qty,horizon:req.query.horizon,risk:req.query.risk}));
+  }catch(error){res.status(502).json({error:'暂时无法生成交易计划',detail:error.message})}
 });
 
 app.get('/api/research/:symbol',auth,async(req,res)=>{
