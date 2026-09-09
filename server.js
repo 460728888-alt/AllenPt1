@@ -15,6 +15,7 @@ const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
 const memoryAnnouncements = [
+  {id:5,slug:'calculator-security-v1-7',title:'盈亏计算器与账号安全功能已上线',content:'新增股票利润亏损计算器，可按个人佣金、最低佣金、印花税和过户费估算保本价、净利润、止损结果与目标卖价。管理员现在可以查看在线状态、强制用户退出并导出不含密码的备份。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:4,slug:'personal-trade-plan-v1-6',title:'个人买入与卖出价格计划已上线',content:'股票详情和我的持仓新增回调关注区间、突破确认价格、防守价格和两档止盈参考价。持仓计划会结合个人成本、数量、周期与风险偏好计算，并在登录时检查价格触发条件。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:3,slug:'research-data-v1-5',title:'真实研究数据与自动提醒已上线',content:'股票详情现已接入公司资料、主要财务指标和公司公告；个人股票池、持仓与投资逻辑支持账号云端同步，并会在登录时自动检查股票池风险。趋势中心新增市场环境与更严格的后段样本验证。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:2,slug:'trend-center-v1-4',title:'趋势预测中心已上线',content:'新增未来5、20、60个交易日趋势研究：显示历史相似条件下的上涨概率、跑赢市场基准概率、收益区间、样本数与历史验证命中率。概率是历史统计，不是涨跌保证。',level:'更新',active:true,created_at:new Date().toISOString()},
@@ -56,13 +57,21 @@ function verifyPassword(password, stored) {
 async function initUsers() {
   const adminHash = hashPassword(PASSWORD);
   if (!pool) {
-    memoryUsers.set(USERNAME, { id:1, username:USERNAME, display_name:'Allen', password_hash:adminHash, role:'admin', active:true });
+    memoryUsers.set(USERNAME, { id:1, username:USERNAME, display_name:'Allen', password_hash:adminHash, role:'admin', active:true,failed_logins:0,locked_until:null,last_login_at:null });
     return;
   }
   await pool.query(`CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY, username VARCHAR(40) UNIQUE NOT NULL, display_name VARCHAR(80) NOT NULL,
     password_hash TEXT NOT NULL, role VARCHAR(10) NOT NULL DEFAULT 'user', active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins INTEGER NOT NULL DEFAULT 0`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_sessions (
+    token_hash VARCHAR(64) PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_agent VARCHAR(240), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), expires_at TIMESTAMPTZ NOT NULL
   )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS announcements (
     id BIGSERIAL PRIMARY KEY, slug VARCHAR(80) UNIQUE, title VARCHAR(120) NOT NULL, content TEXT NOT NULL,
@@ -90,11 +99,13 @@ async function initUsers() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(user_id,alert_key)
   )`);
   await pool.query('CREATE INDEX IF NOT EXISTS prediction_runs_user_symbol_idx ON prediction_runs(user_id,symbol,created_at DESC)');
+  await pool.query('CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions(user_id,last_seen_at DESC)');
   await pool.query(`INSERT INTO users (username,display_name,password_hash,role) VALUES ($1,'Allen',$2,'admin') ON CONFLICT (username) DO NOTHING`,[USERNAME,adminHash]);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('screen-expanded-v1-2','AI 智能选股范围已扩大','智能选股已从固定 29 只样本扩大到约 1200 只成交较活跃的沪深 A 股。投资周期和风险偏好现在会真正影响筛选结果。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('trend-center-v1-4','趋势预测中心已上线','新增未来5、20、60个交易日趋势研究：显示历史相似条件下的上涨概率、跑赢市场基准概率、收益区间、样本数与历史验证命中率。概率是历史统计，不是涨跌保证。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('research-data-v1-5','真实研究数据与自动提醒已上线','股票详情现已接入公司资料、主要财务指标和公司公告；个人股票池、持仓与投资逻辑支持账号云端同步，并会在登录时自动检查股票池风险。趋势中心新增市场环境与更严格的后段样本验证。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('personal-trade-plan-v1-6','个人买入与卖出价格计划已上线','股票详情和我的持仓新增回调关注区间、突破确认价格、防守价格和两档止盈参考价。持仓计划会结合个人成本、数量、周期与风险偏好计算，并在登录时检查价格触发条件。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('calculator-security-v1-7','盈亏计算器与账号安全功能已上线','新增股票利润亏损计算器，可按个人佣金、最低佣金、印花税和过户费估算保本价、净利润、止损结果与目标卖价。管理员现在可以查看在线状态、强制用户退出并导出不含密码的备份。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -110,12 +121,21 @@ function cookies(req) {
   }));
 }
 
-function auth(req, res, next) {
-  const token = cookies(req).allen_session;
-  const session = token && sessions.get(token);
-  if (!session || session.expires < Date.now()) return res.status(401).json({ error: 'unauthorized' });
-  req.user = session.user;
-  next();
+const tokenHash=token=>crypto.createHash('sha256').update(String(token)).digest('hex');
+async function auth(req, res, next) {
+  try{
+    const token=cookies(req).allen_session;
+    if(!token)return res.status(401).json({error:'登录已失效，请重新登录'});
+    if(pool){
+      const hash=tokenHash(token),row=(await pool.query(`SELECT u.id,u.username,u.display_name,u.role,u.active,s.expires_at FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>NOW()`,[hash])).rows[0];
+      if(!row||!row.active)return res.status(401).json({error:'登录已失效，请重新登录'});
+      await pool.query(`UPDATE user_sessions SET last_seen_at=NOW() WHERE token_hash=$1 AND last_seen_at<NOW()-INTERVAL '30 seconds'`,[hash]);
+      req.sessionTokenHash=hash;req.user={id:row.id,username:row.username,displayName:row.display_name,role:row.role};return next();
+    }
+    const session=sessions.get(token);
+    if(!session||session.expires<Date.now())return res.status(401).json({error:'登录已失效，请重新登录'});
+    session.lastSeen=Date.now();req.sessionToken=token;req.user=session.user;next();
+  }catch(error){next(error)}
 }
 function admin(req,res,next){return req.user?.role==='admin'?next():res.status(403).json({error:'仅管理员可操作'})}
 
@@ -282,7 +302,7 @@ function eastmoneyCodes(symbol) {
 }
 
 async function publicJson(url, timeout=15000) {
-  const response=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 AllenStock/1.6','Referer':'https://data.eastmoney.com/'},signal:AbortSignal.timeout(timeout)});
+  const response=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 AllenStock/1.7','Referer':'https://data.eastmoney.com/'},signal:AbortSignal.timeout(timeout)});
   if(!response.ok)throw new Error(`公开数据源返回 ${response.status}`);
   return response.json();
 }
@@ -351,7 +371,18 @@ function cleanUserState(body={}) {
     }
     return result;
   }).filter(item=>item.symbol):[];
-  return {watch:cleanItems(body.watch,100),portfolio:cleanItems(body.portfolio,100),theses:cleanItems(body.theses,100)};
+  const feeInput=body.feeSettings||{};
+  const feeNumber=(key,fallback,min,max)=>{
+    const value=Number(feeInput[key]);
+    return Number.isFinite(value)?clamp(value,min,max):fallback;
+  };
+  const feeSettings={
+    commissionRatePer10000:feeNumber('commissionRatePer10000',2.5,0,30),
+    minimumCommission:feeNumber('minimumCommission',5,0,100),
+    stampDutyRatePer10000:feeNumber('stampDutyRatePer10000',5,0,20),
+    transferFeeRatePer10000:feeNumber('transferFeeRatePer10000',0.1,0,5)
+  };
+  return {watch:cleanItems(body.watch,100),portfolio:cleanItems(body.portfolio,100),theses:cleanItems(body.theses,100),feeSettings};
 }
 
 async function getUserState(userId) {
@@ -541,27 +572,42 @@ async function buildPrediction(rawSymbol) {
   };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.6.0', aiConfigured:Boolean(AI_API_KEY) }));
-app.get('/api/session', (req, res) => {
-  const session = sessions.get(cookies(req).allen_session);
-  const valid = Boolean(session && session.expires > Date.now());
-  res.json({ authenticated:valid, user:valid?session.user:null });
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.7.0', aiConfigured:Boolean(AI_API_KEY) }));
+app.get('/api/session',async(req,res)=>{
+  try{
+    const token=cookies(req).allen_session;if(!token)return res.json({authenticated:false,user:null});
+    if(pool){const row=(await pool.query(`SELECT u.id,u.username,u.display_name,u.role FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>NOW() AND u.active=TRUE`,[tokenHash(token)])).rows[0];return res.json({authenticated:Boolean(row),user:row?{id:row.id,username:row.username,displayName:row.display_name,role:row.role}:null})}
+    const session=sessions.get(token),valid=Boolean(session&&session.expires>Date.now());res.json({authenticated:valid,user:valid?session.user:null});
+  }catch{res.json({authenticated:false,user:null})}
 });
 app.post('/api/login', async (req, res) => {
   const username = String(req.body.username || '').trim().toLowerCase().slice(0,40);
   const user = await findUser(username);
-  if (!user || !user.active || !verifyPassword(String(req.body.password || ''),user.password_hash)) return res.status(401).json({ error: '账号、密码错误或账号已停用' });
+  if(user?.locked_until&&new Date(user.locked_until)>new Date())return res.status(423).json({error:'登录失败次数过多，请15分钟后再试'});
+  if (!user || !user.active || !verifyPassword(String(req.body.password || ''),user.password_hash)) {
+    if(user){
+      if(pool)await pool.query(`UPDATE users SET failed_logins=failed_logins+1,locked_until=CASE WHEN failed_logins+1>=5 THEN NOW()+INTERVAL '15 minutes' ELSE locked_until END WHERE id=$1`,[user.id]);
+      else{user.failed_logins=(user.failed_logins||0)+1;if(user.failed_logins>=5)user.locked_until=new Date(Date.now()+15*60*1000).toISOString()}
+    }
+    return res.status(401).json({ error: '账号、密码错误或账号已停用' });
+  }
   const token = crypto.randomBytes(32).toString('hex');
   const safeUser={id:user.id,username:user.username,displayName:user.display_name,role:user.role};
-  sessions.set(token, { expires: Date.now() + 7 * 864e5, user:safeUser });
+  if(pool){
+    await pool.query(`DELETE FROM user_sessions WHERE expires_at<=NOW()`);
+    await pool.query(`INSERT INTO user_sessions(token_hash,user_id,user_agent,expires_at) VALUES($1,$2,$3,NOW()+INTERVAL '7 days')`,[tokenHash(token),user.id,String(req.headers['user-agent']||'未知设备').slice(0,240)]);
+    await pool.query(`UPDATE users SET failed_logins=0,locked_until=NULL,last_login_at=NOW() WHERE id=$1`,[user.id]);
+  }else{sessions.set(token,{expires:Date.now()+7*864e5,user:safeUser,lastSeen:Date.now(),userAgent:String(req.headers['user-agent']||'未知设备').slice(0,240)});user.failed_logins=0;user.locked_until=null;user.last_login_at=new Date().toISOString()}
   res.setHeader('Set-Cookie', `allen_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`);
   res.json({ ok: true, user:safeUser });
 });
-app.post('/api/logout', (req, res) => {
-  sessions.delete(cookies(req).allen_session);
+app.post('/api/logout', async (req, res) => {
+  const token=cookies(req).allen_session;
+  if(token){if(pool)await pool.query('DELETE FROM user_sessions WHERE token_hash=$1',[tokenHash(token)]);else sessions.delete(token)}
   res.setHeader('Set-Cookie', 'allen_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
   res.json({ ok: true });
 });
+app.post('/api/presence',auth,(_req,res)=>res.json({ok:true}));
 
 app.get('/api/user-state',auth,async(req,res)=>res.json({state:await getUserState(req.user.id)}));
 app.put('/api/user-state',auth,async(req,res)=>{
@@ -600,7 +646,7 @@ app.post('/api/monitor',auth,async(req,res)=>{
 });
 
 app.get('/api/admin/users',auth,admin,async(_req,res)=>{
-  const users=pool?(await pool.query('SELECT id,username,display_name AS "displayName",role,active,created_at AS "createdAt" FROM users ORDER BY id')).rows:[...memoryUsers.values()].map(({password_hash,...u})=>({...u,displayName:u.display_name}));
+  const users=pool?(await pool.query(`SELECT u.id,u.username,u.display_name AS "displayName",u.role,u.active,u.created_at AS "createdAt",u.last_login_at AS "lastLoginAt",MAX(s.last_seen_at) AS "lastSeenAt",COUNT(s.token_hash)::int AS "deviceCount",COALESCE(MAX(s.last_seen_at)>NOW()-INTERVAL '2 minutes',FALSE) AS online FROM users u LEFT JOIN user_sessions s ON s.user_id=u.id AND s.expires_at>NOW() GROUP BY u.id ORDER BY u.id`)).rows:[...memoryUsers.values()].map(({password_hash,...u})=>{const activeSessions=[...sessions.values()].filter(s=>String(s.user.id)===String(u.id)&&s.expires>Date.now());const lastSeen=activeSessions.length?Math.max(...activeSessions.map(s=>s.lastSeen||0)):null;return {...u,displayName:u.display_name,lastLoginAt:u.last_login_at,lastSeenAt:lastSeen?new Date(lastSeen).toISOString():null,deviceCount:activeSessions.length,online:Boolean(lastSeen&&lastSeen>Date.now()-120000)}});
   res.json({users});
 });
 app.post('/api/admin/users',auth,admin,async(req,res)=>{
@@ -608,14 +654,30 @@ app.post('/api/admin/users',auth,admin,async(req,res)=>{
   const displayName=String(req.body.displayName||username).trim().slice(0,80), password=String(req.body.password||'');
   if(username.length<3||password.length<6)return res.status(400).json({error:'用户名至少3位，密码至少6位'});
   const passwordHash=hashPassword(password);
-  try{if(pool)await pool.query(`INSERT INTO users(username,display_name,password_hash,role) VALUES($1,$2,$3,'user')`,[username,displayName,passwordHash]);else{if(memoryUsers.has(username))throw new Error('duplicate');memoryUsers.set(username,{id:Date.now(),username,display_name:displayName,password_hash:passwordHash,role:'user',active:true})}res.json({ok:true})}catch{return res.status(409).json({error:'用户名已存在'})}
+  try{if(pool)await pool.query(`INSERT INTO users(username,display_name,password_hash,role) VALUES($1,$2,$3,'user')`,[username,displayName,passwordHash]);else{if(memoryUsers.has(username))throw new Error('duplicate');memoryUsers.set(username,{id:Date.now(),username,display_name:displayName,password_hash:passwordHash,role:'user',active:true,failed_logins:0,locked_until:null,last_login_at:null})}res.json({ok:true})}catch{return res.status(409).json({error:'用户名已存在'})}
 });
 app.patch('/api/admin/users/:id',auth,admin,async(req,res)=>{
   const id=String(req.params.id), action=req.body.action;
   if(String(req.user.id)===id)return res.status(400).json({error:'不能停用或修改自己的管理员账号'});
-  if(action==='toggle'){if(pool)await pool.query('UPDATE users SET active=NOT active WHERE id=$1',[id]);else{const u=[...memoryUsers.values()].find(x=>String(x.id)===id);if(u)u.active=!u.active}}
-  else if(action==='reset'){const p=String(req.body.password||'');if(p.length<6)return res.status(400).json({error:'密码至少6位'});const h=hashPassword(p);if(pool)await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2',[h,id]);else{const u=[...memoryUsers.values()].find(x=>String(x.id)===id);if(u)u.password_hash=h}}
+  if(action==='toggle'){if(pool){await pool.query('UPDATE users SET active=NOT active WHERE id=$1',[id]);await pool.query('DELETE FROM user_sessions WHERE user_id=$1',[id])}else{const u=[...memoryUsers.values()].find(x=>String(x.id)===id);if(u)u.active=!u.active;for(const [token,s] of sessions)if(String(s.user.id)===id)sessions.delete(token)}}
+  else if(action==='reset'){const p=String(req.body.password||'');if(p.length<6)return res.status(400).json({error:'密码至少6位'});const h=hashPassword(p);if(pool){await pool.query('UPDATE users SET password_hash=$1,failed_logins=0,locked_until=NULL WHERE id=$2',[h,id]);await pool.query('DELETE FROM user_sessions WHERE user_id=$1',[id])}else{const u=[...memoryUsers.values()].find(x=>String(x.id)===id);if(u){u.password_hash=h;u.failed_logins=0;u.locked_until=null};for(const [token,s] of sessions)if(String(s.user.id)===id)sessions.delete(token)}}
+  else if(action==='forceLogout'){if(pool)await pool.query('DELETE FROM user_sessions WHERE user_id=$1',[id]);else for(const [token,s] of sessions)if(String(s.user.id)===id)sessions.delete(token)}
   else return res.status(400).json({error:'操作无效'});res.json({ok:true});
+});
+app.get('/api/admin/backup',auth,admin,async(_req,res)=>{
+  const createdAt=new Date().toISOString();let backup;
+  if(pool){
+    const [users,states,announcements,reads,predictions,alerts]=await Promise.all([
+      pool.query('SELECT id,username,display_name,role,active,created_at,last_login_at FROM users ORDER BY id'),
+      pool.query('SELECT user_id,data_json,updated_at FROM user_states ORDER BY user_id'),
+      pool.query('SELECT id,slug,title,content,level,active,created_at FROM announcements ORDER BY id'),
+      pool.query('SELECT announcement_id,user_id,read_at FROM announcement_reads ORDER BY user_id,announcement_id'),
+      pool.query('SELECT id,user_id,symbol,name,result_json,created_at FROM prediction_runs ORDER BY id'),
+      pool.query('SELECT id,user_id,alert_key,symbol,title,content,level,read_at,created_at FROM user_alerts ORDER BY id')
+    ]);
+    backup={version:'1.7.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows};
+  }else backup={version:'1.7.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts};
+  res.setHeader('Content-Disposition',`attachment; filename="allen-stock-backup-${createdAt.slice(0,10)}.json"`);res.json(backup);
 });
 
 app.get('/api/announcements',auth,async(req,res)=>{
