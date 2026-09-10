@@ -47,6 +47,7 @@ const MARKET_SCAN_PAGES = 12;
 const MARKET_CACHE_MS = 10 * 60 * 1000;
 let marketSnapshotCache = null;
 const researchCache = new Map();
+const chineseNameCache = new Map(Object.entries(CN_NAMES));
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   return `${salt}:${crypto.scryptSync(password, salt, 64).toString('hex')}`;
@@ -273,6 +274,22 @@ function standardDeviation(values) {
   return Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length);
 }
 
+async function resolveChineseStockName(symbol) {
+  if (chineseNameCache.has(symbol)) return chineseNameCache.get(symbol);
+  if (!/^[036]\d{5}\.(SS|SZ)$/.test(symbol)) return null;
+  const code = symbol.slice(0, 6);
+  const secid = `${symbol.endsWith('.SS') ? '1' : '0'}.${code}`;
+  try {
+    const data = await publicJson(`https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f57,f58`, 8000);
+    const name = String(data?.data?.f58 || '').trim();
+    if (name && name !== '-' && /[\u3400-\u9fff]/.test(name)) {
+      chineseNameCache.set(symbol, name);
+      return name;
+    }
+  } catch {}
+  return null;
+}
+
 async function getStockData(rawSymbol, options = {}) {
   const symbol = normalizeSymbol(rawSymbol);
   if (!symbol) throw new Error('股票代码无效');
@@ -280,7 +297,8 @@ async function getStockData(rawSymbol, options = {}) {
   const searchPromise = options.withNews === false
     ? Promise.resolve({ news: [] })
     : yahooJson(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&quotesCount=1&newsCount=8`).catch(() => ({ news: [] }));
-  const [chart, search] = await Promise.all([chartPromise, searchPromise]);
+  const chineseNamePromise = resolveChineseStockName(symbol);
+  const [chart, search, chineseName] = await Promise.all([chartPromise, searchPromise, chineseNamePromise]);
   const result = chart.chart?.result?.[0];
   if (!result) throw new Error('symbol not found');
   const meta = result.meta || {};
@@ -299,7 +317,7 @@ async function getStockData(rawSymbol, options = {}) {
   const momentum = price && ma20 ? ((price / ma20) - 1) * 100 : 0;
   const score = Math.max(0, Math.min(100, Math.round(60 + momentum * 2 + (ma5 > ma20 ? 8 : -5) + (ma20 > ma60 ? 7 : -4) - Math.max(0, volatility20 - 3) * 2)));
   const stock = {
-    symbol, code:symbol.slice(0,6), name: CN_NAMES[symbol] || meta.longName || meta.shortName || symbol,
+    symbol, code:symbol.slice(0,6), name: chineseName || CN_NAMES[symbol] || meta.longName || meta.shortName || symbol,
     currency: meta.currency || '', exchange: meta.exchangeName || '', price, previous, changePct,
     marketTime: meta.regularMarketTime || null,
     technical: { ma5, ma20, ma60, high20, low20, volume: volumes.at(-1) || null, volatility20, score },
@@ -627,7 +645,7 @@ async function predictionScorecard(userId){
   return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.10.0', aiConfigured:Boolean(AI_API_KEY) }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.10.1', aiConfigured:Boolean(AI_API_KEY) }));
 app.get('/api/session',async(req,res)=>{
   try{
     const token=cookies(req).allen_session;if(!token)return res.json({authenticated:false,user:null});
@@ -731,8 +749,8 @@ app.get('/api/admin/backup',auth,admin,async(_req,res)=>{
       pool.query('SELECT id,user_id,alert_key,symbol,title,content,level,read_at,created_at FROM user_alerts ORDER BY id'),
       pool.query('SELECT id,user_id,symbol,name,score,status,price,data_date,created_at FROM signal_snapshots ORDER BY id')
     ]);
-    backup={version:'1.10.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
-  }else backup={version:'1.10.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
+    backup={version:'1.10.1',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
+  }else backup={version:'1.10.1',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
   res.setHeader('Content-Disposition',`attachment; filename="allen-stock-backup-${createdAt.slice(0,10)}.json"`);res.json(backup);
 });
 
@@ -775,8 +793,13 @@ app.get('/api/search', auth, async (req, res) => {
   try {
     const q = encodeURIComponent(String(req.query.q || '').slice(0, 50));
     const data = await yahooJson(`https://query1.finance.yahoo.com/v1/finance/search?q=${q}&quotesCount=12&newsCount=5`);
+    const quotes = await Promise.all((data.quotes || []).filter(x => x.symbol).map(async x => {
+      const symbol = normalizeSymbol(x.symbol);
+      const chineseName = await resolveChineseStockName(symbol);
+      return { symbol, name:chineseName || CN_NAMES[symbol] || x.shortname || x.longname || symbol, exchange:x.exchDisp || x.exchange || '' };
+    }));
     res.json({
-      quotes: (data.quotes || []).filter(x => x.symbol).map(x => ({ symbol: x.symbol, name: CN_NAMES[x.symbol] || x.shortname || x.longname || x.symbol, exchange: x.exchDisp || x.exchange || '' })),
+      quotes,
       news: (data.news || []).map(x => ({ title: x.title, publisher: x.publisher, link: x.link, published: x.providerPublishTime }))
     });
   } catch (error) { res.status(502).json({ error: '暂时无法获取搜索数据', detail: error.message }); }
