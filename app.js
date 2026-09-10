@@ -46,7 +46,14 @@ async function api(url, options={}) {
 }
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2400)}
 function badge(score){return score>=80?['green','重点关注']:score>=60?['yellow','等待更好机会']:score>=40?['orange','谨慎观察']:['red','风险较高']}
-function navRender(){ const items=currentUser?.role==='admin'?[...nav.slice(0,-1),adminNav,nav.at(-1)]:nav;$('#nav').innerHTML=items.map(([id,icon,name])=>`<button class="nav-btn ${state.page===id?'active':''}" data-page="${id}"><span class="nav-icon">${icon}</span>${name}</button>`).join(''); }
+const navById=Object.fromEntries(nav.map(item=>[item[0],item]));
+function navButton(item){const [id,icon,name]=item;return `<button class="nav-btn ${state.page===id?'active':''}" data-page="${id}"><span class="nav-icon">${icon}</span><span>${name}</span></button>`}
+function navGroup(title,items){const open=items.some(([id])=>id===state.page);return `<details class="nav-group" ${open?'open':''}><summary><span>${title}</span><span class="nav-chevron">⌄</span></summary><div>${items.map(navButton).join('')}</div></details>`}
+function navRender(){
+  const pick=ids=>ids.map(id=>navById[id]).filter(Boolean);
+  const management=currentUser?.role==='admin'?[adminNav,navById.settings]:[navById.settings];
+  $('#nav').innerHTML=`<div class="nav-label">常用</div>${pick(['dashboard','watchlist','search','decisions','portfolio']).map(navButton).join('')}${navGroup('AI 研究',pick(['aiChat','aiScreen','prediction']))}${navGroup('研究工具',pick(['risks','events','calculator','theses','brief']))}${navGroup('管理与设置',management)}`;
+}
 function go(page){state.page=page;navRender();$('#breadcrumb').textContent=page==='dashboard'?'OVERVIEW':'ALLEN STOCK / '+page.toUpperCase();$('#pageTitle').textContent=pageMeta[page]||'股票详情';$('.sidebar').classList.remove('open');render()}
 
 async function quote(symbol){return api('/api/stock/'+encodeURIComponent(symbol))}
@@ -57,13 +64,17 @@ function loading(){return '<div class="card empty">正在读取真实行情…</
 async function dashboard(){
   $('#content').innerHTML=loading(); const rows=await quoteMany(state.watch.slice(0,5));
   const risks=rows.filter(x=>(x.technical?.score??60)<50).length, positives=rows.filter(x=>(x.changePct??0)>1).length;
-  $('#content').innerHTML=`<div class="grid g4">
-    <div class="card"><div class="muted">股票池</div><div class="metric">${state.watch.length}</div><span class="badge blue">私人关注</span></div>
+  const riskRows=rows.filter(x=>(x.technical?.score??60)<50).sort((a,b)=>(a.technical?.score??60)-(b.technical?.score??60));
+  const moveRows=[...rows].sort((a,b)=>Math.abs(b.changePct||0)-Math.abs(a.changePct||0));
+  const focus=riskRows[0]||moveRows[0];
+  const waiting=Math.max(0,rows.length-positives-risks);
+  $('#content').innerHTML=`<section class="card today-focus"><div class="focus-layout"><div class="focus-copy"><p class="eyebrow">TODAY / 今日先看</p><h2>${risks?`${risks} 只股票需要优先检查风险`:'股票池暂无高风险信号'}</h2><p>${risks?'先查看评分较低的股票，再决定继续持有、等待还是降低风险。':'先看波动最大的股票，并确认原有投资逻辑是否仍然成立。'}</p><div class="focus-stock">${focus?`<span>${risks?'优先检查':'今日波动'}</span><b>${focus.name}</b><small>${Number.isFinite(focus.changePct)?`今日 ${(focus.changePct>=0?'+':'')+fmt(focus.changePct)+'%'}`:'行情暂不可用'} · 综合评分 ${focus.technical?.score??'—'}</small><button class="focus-link" data-stock="${focus.symbol}" data-name="${focus.name}">查看完整分析 →</button>`:'<span>股票池为空</span><b>先添加一只股票</b><button class="focus-link" data-go="search">搜索股票 →</button>'}</div></div><div class="focus-actions"><button data-go="decisions"><span>下一步 1</span><b>查看买卖决策</b><small>核对入场、等待或防守条件</small></button><button data-go="portfolio"><span>下一步 2</span><b>检查我的持仓</b><small>查看成本、止盈与风险位置</small></button><button data-go="risks"><span>下一步 3</span><b>处理风险提醒</b><small>${risks?`当前有 ${risks} 项优先风险`:'当前没有高风险项'}</small></button></div></div></section>
+    <section class="grid g4 summary-strip">
+    <div class="card"><div class="muted">股票池</div><div class="metric">${state.watch.length}</div><span class="badge blue">个人关注</span></div>
     <div class="card"><div class="muted">积极变化</div><div class="metric">${positives}</div><span class="badge green">今日上涨 &gt; 1%</span></div>
-    <div class="card"><div class="muted">需要关注</div><div class="metric">${Math.max(0,rows.length-positives-risks)}</div><span class="badge yellow">等待条件</span></div>
-    <div class="card"><div class="muted">重要风险</div><div class="metric">${risks}</div><span class="badge red">评分低于 50</span></div></div>
+    <div class="card"><div class="muted">等待条件</div><div class="metric">${waiting}</div><span class="badge yellow">继续观察</span></div>
+    <div class="card"><div class="muted">重要风险</div><div class="metric">${risks}</div><span class="badge red">评分低于 50</span></div></section>
     <section class="section grid g2"><div class="card"><h2>🧠 今日 AI 总结</h2><p>系统已对股票池的最新价格、均线和动量进行检查。</p><p class="note">${positives?'有 '+positives+' 只股票出现积极价格变化，但仍需结合基本面与风险判断。':'今日暂未发现明显的积极价格变化，继续等待条件改善。'}</p></div><div class="card"><h2>🚨 今日最重要事件</h2>${rows.sort((a,b)=>Math.abs(b.changePct||0)-Math.abs(a.changePct||0)).slice(0,2).map(x=>`<div class="event"><div class="event-icon">${(x.changePct||0)>=0?'↗':'↘'}</div><div><b>${x.name}</b><p class="muted">今日波动 ${(x.changePct||0)>=0?'+':''}${fmt(x.changePct)}%，建议查看完整分析。</p><button class="link" data-stock="${x.symbol}" data-name="${x.name}">查看详情 →</button></div></div>`).join('')}</div></section>
-    <section class="section"><div class="section-head"><h2>快捷入口</h2></div><div class="grid g4">${[['watchlist','★','我的股票池'],['search','⌕','搜索股票'],['decisions','◎','AI 分析'],['risks','△','风险中心']].map(x=>`<div class="card quick" data-go="${x[0]}"><div class="big-icon">${x[1]}</div><b>${x[2]}</b><p class="muted">打开 →</p></div>`).join('')}</div></section>
     <section class="section"><div class="section-head"><h2>我的股票池</h2><button class="link" data-go="watchlist">查看全部 →</button></div><div class="card">${stockTable(rows)}</div></section>${disclaimer()}`;
 }
 async function watchlist(){ $('#content').innerHTML=loading();const rows=await quoteMany(state.watch);$('#content').innerHTML=`<div class="section-head"><div><h2>我的股票池</h2><p class="muted">追踪真实行情与综合条件</p></div><button class="primary" data-go="search">＋ 添加股票</button></div><div class="card">${stockTable(rows,true)}</div>${disclaimer()}` }
