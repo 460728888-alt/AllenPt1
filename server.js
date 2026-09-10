@@ -15,6 +15,7 @@ const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
 const memoryAnnouncements = [
+  {id:8,slug:'research-console-v1-10',title:'全景研究台与预测成绩单已上线',content:'首页升级为适合 iPad 横屏的全景研究台：可在同一屏查看股票池、重点股票、行动价格、核心结论和最新公告。新增评分变化记录、股票详情行动方案卡，以及按5、20、60个交易日自动后验验证的预测成绩单。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:7,slug:'ipad-layout-v1-9',title:'iPad 横屏首页布局已优化',content:'首页新增“今日先看”，优先展示需要处理的股票与下一步行动；侧边栏已整理为常用入口和可折叠分组。所有原有功能与个人数据保持不变。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:6,slug:'scenario-decision-v1-8',title:'AI 情景判断已上线',content:'趋势预测中心新增当前情景判断：自动识别当前更接近上涨、震荡或下跌情景，并显示触发条件和对应行动；另外两种可能折叠展示。原有页面与功能保持不变。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:5,slug:'calculator-security-v1-7',title:'盈亏计算器与账号安全功能已上线',content:'新增股票利润亏损计算器，可按个人佣金、最低佣金、印花税和过户费估算保本价、净利润、止损结果与目标卖价。管理员现在可以查看在线状态、强制用户退出并导出不含密码的备份。',level:'更新',active:true,created_at:new Date().toISOString()},
@@ -25,6 +26,7 @@ const memoryAnnouncements = [
 ];
 const memoryAnnouncementReads = new Map();
 const memoryPredictions = [];
+const memorySignalSnapshots = [];
 const memoryUserStates = new Map();
 const memoryAlerts = [];
 const aiUsage = new Map();
@@ -90,6 +92,12 @@ async function initUsers() {
     symbol VARCHAR(24) NOT NULL, name VARCHAR(120) NOT NULL, result_json JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS signal_snapshots (
+    id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    symbol VARCHAR(24) NOT NULL, name VARCHAR(120) NOT NULL, score INTEGER NOT NULL,
+    status VARCHAR(40) NOT NULL, price NUMERIC, data_date DATE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(user_id,symbol,data_date)
+  )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS user_states (
     user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     data_json JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -101,6 +109,7 @@ async function initUsers() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(user_id,alert_key)
   )`);
   await pool.query('CREATE INDEX IF NOT EXISTS prediction_runs_user_symbol_idx ON prediction_runs(user_id,symbol,created_at DESC)');
+  await pool.query('CREATE INDEX IF NOT EXISTS signal_snapshots_user_symbol_idx ON signal_snapshots(user_id,symbol,data_date DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions(user_id,last_seen_at DESC)');
   await pool.query(`INSERT INTO users (username,display_name,password_hash,role) VALUES ($1,'Allen',$2,'admin') ON CONFLICT (username) DO NOTHING`,[USERNAME,adminHash]);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('screen-expanded-v1-2','AI 智能选股范围已扩大','智能选股已从固定 29 只样本扩大到约 1200 只成交较活跃的沪深 A 股。投资周期和风险偏好现在会真正影响筛选结果。','更新') ON CONFLICT(slug) DO NOTHING`);
@@ -110,6 +119,7 @@ async function initUsers() {
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('calculator-security-v1-7','盈亏计算器与账号安全功能已上线','新增股票利润亏损计算器，可按个人佣金、最低佣金、印花税和过户费估算保本价、净利润、止损结果与目标卖价。管理员现在可以查看在线状态、强制用户退出并导出不含密码的备份。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('scenario-decision-v1-8','AI 情景判断已上线','趋势预测中心新增当前情景判断：自动识别当前更接近上涨、震荡或下跌情景，并显示触发条件和对应行动；另外两种可能折叠展示。原有页面与功能保持不变。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('ipad-layout-v1-9','iPad 横屏首页布局已优化','首页新增“今日先看”，优先展示需要处理的股票与下一步行动；侧边栏已整理为常用入口和可折叠分组。所有原有功能与个人数据保持不变。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('research-console-v1-10','全景研究台与预测成绩单已上线','首页升级为适合 iPad 横屏的全景研究台：可在同一屏查看股票池、重点股票、行动价格、核心结论和最新公告。新增评分变化记录、股票详情行动方案卡，以及按5、20、60个交易日自动后验验证的预测成绩单。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -576,7 +586,48 @@ async function buildPrediction(rawSymbol) {
   };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.9.0', aiConfigured:Boolean(AI_API_KEY) }));
+async function saveSignalSnapshots(userId, items) {
+  const today=new Date().toISOString().slice(0,10),changes=[];
+  for(const raw of items.slice(0,20)){
+    const symbol=normalizeSymbol(raw.symbol),name=String(raw.name||symbol).slice(0,120),score=Math.round(clamp(Number(raw.score)||0)),status=String(raw.status||'待判断').slice(0,40),price=finiteNumber(raw.price);
+    if(!symbol)continue;
+    let previous=null;
+    if(pool){
+      previous=(await pool.query(`SELECT score,status,price,data_date AS "dataDate" FROM signal_snapshots WHERE user_id=$1 AND symbol=$2 AND data_date<$3 ORDER BY data_date DESC LIMIT 1`,[userId,symbol,today])).rows[0]||null;
+      await pool.query(`INSERT INTO signal_snapshots(user_id,symbol,name,score,status,price,data_date) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id,symbol,data_date) DO UPDATE SET name=EXCLUDED.name,score=EXCLUDED.score,status=EXCLUDED.status,price=EXCLUDED.price,created_at=NOW()`,[userId,symbol,name,score,status,price,today]);
+    }else{
+      previous=memorySignalSnapshots.filter(x=>x.userId===String(userId)&&x.symbol===symbol&&x.dataDate<today).sort((a,b)=>b.dataDate.localeCompare(a.dataDate))[0]||null;
+      const current=memorySignalSnapshots.find(x=>x.userId===String(userId)&&x.symbol===symbol&&x.dataDate===today);
+      if(current)Object.assign(current,{name,score,status,price});else memorySignalSnapshots.push({userId:String(userId),symbol,name,score,status,price,dataDate:today});
+    }
+    changes.push({symbol,previousScore:previous?.score??null,previousStatus:previous?.status??null,scoreDelta:previous?score-Number(previous.score):null,statusChanged:Boolean(previous&&previous.status!==status)});
+  }
+  return changes;
+}
+
+async function predictionScorecard(userId){
+  const stored=pool?(await pool.query(`SELECT symbol,name,result_json AS result,created_at AS "createdAt" FROM prediction_runs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 160`,[userId])).rows:memoryPredictions.filter(x=>x.userId===String(userId)).slice(0,160);
+  const seen=new Set(),runs=[];
+  for(const item of stored){const result=item.result||item.result_json||{},key=`${item.symbol}:${result.dataThrough}`;if(!result.dataThrough||seen.has(key))continue;seen.add(key);runs.push({...item,result})}
+  if(!runs.length)return {overall:{evaluated:0,pending:0,hitRate:null,averageReturn:null,outperformRate:null},horizons:[]};
+  const benchmark=await getDailySeries('000001.SS'),benchmarkMap=new Map(benchmark.rows.map(row=>[row.time,row.close])),seriesCache=new Map(),evaluations=[];
+  for(const run of runs){
+    let series=seriesCache.get(run.symbol);if(!series){try{series=await getDailySeries(run.symbol);seriesCache.set(run.symbol,series)}catch{continue}}
+    const baseIndex=series.rows.findIndex(row=>new Date(row.time*1000).toISOString().slice(0,10)===run.result.dataThrough);
+    if(baseIndex<0)continue;
+    for(const forecast of run.result.horizons||[]){
+      const future=series.rows[baseIndex+forecast.days],base=series.rows[baseIndex];
+      if(!future){evaluations.push({days:forecast.days,pending:true});continue}
+      const benchmarkStart=benchmarkMap.get(base.time),benchmarkEnd=benchmarkMap.get(future.time);if(!Number.isFinite(benchmarkStart)||!Number.isFinite(benchmarkEnd))continue;
+      const actualReturn=percentChange(base.close,future.close)-.2,excess=actualReturn-percentChange(benchmarkStart,benchmarkEnd),predictedUp=Number(forecast.outperformProbability)>=50;
+      evaluations.push({days:forecast.days,pending:false,actualReturn,excess,hit:(predictedUp&&excess>0)||(!predictedUp&&excess<=0)});
+    }
+  }
+  const summarize=list=>{const done=list.filter(x=>!x.pending),pending=list.filter(x=>x.pending).length;return {evaluated:done.length,pending,hitRate:done.length?Number((done.filter(x=>x.hit).length/done.length*100).toFixed(1)):null,averageReturn:done.length?Number((done.reduce((s,x)=>s+x.actualReturn,0)/done.length).toFixed(1)):null,outperformRate:done.length?Number((done.filter(x=>x.excess>0).length/done.length*100).toFixed(1)):null}};
+  return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
+}
+
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.10.0', aiConfigured:Boolean(AI_API_KEY) }));
 app.get('/api/session',async(req,res)=>{
   try{
     const token=cookies(req).allen_session;if(!token)return res.json({authenticated:false,user:null});
@@ -671,16 +722,17 @@ app.patch('/api/admin/users/:id',auth,admin,async(req,res)=>{
 app.get('/api/admin/backup',auth,admin,async(_req,res)=>{
   const createdAt=new Date().toISOString();let backup;
   if(pool){
-    const [users,states,announcements,reads,predictions,alerts]=await Promise.all([
+    const [users,states,announcements,reads,predictions,alerts,signals]=await Promise.all([
       pool.query('SELECT id,username,display_name,role,active,created_at,last_login_at FROM users ORDER BY id'),
       pool.query('SELECT user_id,data_json,updated_at FROM user_states ORDER BY user_id'),
       pool.query('SELECT id,slug,title,content,level,active,created_at FROM announcements ORDER BY id'),
       pool.query('SELECT announcement_id,user_id,read_at FROM announcement_reads ORDER BY user_id,announcement_id'),
       pool.query('SELECT id,user_id,symbol,name,result_json,created_at FROM prediction_runs ORDER BY id'),
-      pool.query('SELECT id,user_id,alert_key,symbol,title,content,level,read_at,created_at FROM user_alerts ORDER BY id')
+      pool.query('SELECT id,user_id,alert_key,symbol,title,content,level,read_at,created_at FROM user_alerts ORDER BY id'),
+      pool.query('SELECT id,user_id,symbol,name,score,status,price,data_date,created_at FROM signal_snapshots ORDER BY id')
     ]);
-    backup={version:'1.9.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows};
-  }else backup={version:'1.9.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts};
+    backup={version:'1.10.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
+  }else backup={version:'1.10.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
   res.setHeader('Content-Disposition',`attachment; filename="allen-stock-backup-${createdAt.slice(0,10)}.json"`);res.json(backup);
 });
 
@@ -743,6 +795,11 @@ app.get('/api/trade-plan/:symbol',auth,async(req,res)=>{
   }catch(error){res.status(502).json({error:'暂时无法生成交易计划',detail:error.message})}
 });
 
+app.post('/api/signals/snapshot',auth,async(req,res)=>{
+  try{res.json({changes:await saveSignalSnapshots(req.user.id,Array.isArray(req.body.items)?req.body.items:[])})}
+  catch(error){res.status(500).json({error:'评分变化暂时无法保存',detail:error.message})}
+});
+
 app.get('/api/research/:symbol',auth,async(req,res)=>{
   try{res.json(await getResearchData(req.params.symbol))}
   catch(error){res.status(502).json({error:error.message||'深度研究数据暂时不可用'})}
@@ -756,6 +813,7 @@ app.post('/api/prediction', auth, async (req,res) => {
     else previous=memoryPredictions.find(item=>item.userId===String(req.user.id)&&item.symbol===result.symbol)?.result||null;
     if(previous?.horizons){
       const changes=result.horizons.map(current=>{const before=previous.horizons.find(item=>item.days===current.days);return before?{days:current.days,before:before.outperformProbability,now:current.outperformProbability,beforeDirection:before.direction,nowDirection:current.direction}:null}).filter(Boolean);
+      result.changes=changes;
       const important=changes.find(item=>Math.abs(item.now-item.before)>=15||item.beforeDirection!==item.nowDirection);
       if(important)await addUserAlert(req.user.id,{key:`prediction:${result.symbol}:${result.dataThrough}:${important.days}`,symbol:result.symbol,title:`${result.name}趋势概率发生变化`,content:`未来${important.days}个交易日跑赢市场基准的历史条件概率由${important.before}%变为${important.now}%，方向由“${important.beforeDirection}”变为“${important.nowDirection}”。请重新检查风险和持仓计划。`,level:'变化'});
     }
@@ -780,6 +838,11 @@ app.get('/api/predictions/recent', auth, async (req,res) => {
     return res.json({predictions:rows});
   }
   res.json({predictions:memoryPredictions.filter(item=>item.userId===String(req.user.id)&&(!symbol||item.symbol===symbol)).slice(0,8)});
+});
+
+app.get('/api/predictions/scorecard',auth,async(req,res)=>{
+  try{res.json(await predictionScorecard(req.user.id))}
+  catch(error){res.status(502).json({error:'历史成绩单暂时无法计算',detail:error.message})}
 });
 
 app.get('/api/ai/status', auth, (_req,res) => res.json({ configured:Boolean(AI_API_KEY), provider:AI_BASE_URL.includes('deepseek')?'DeepSeek':'兼容模型', model:AI_MODEL }));
