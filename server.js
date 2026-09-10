@@ -37,7 +37,8 @@ const CN_NAMES = {
   '601318.SS':'中国平安','601166.SS':'兴业银行','600030.SS':'中信证券','688008.SS':'澜起科技','002463.SZ':'沪电股份',
   '603986.SS':'兆易创新','000333.SZ':'美的集团','000651.SZ':'格力电器','300059.SZ':'东方财富','600276.SS':'恒瑞医药',
   '601899.SS':'紫金矿业','600900.SS':'长江电力','601088.SS':'中国神华','000725.SZ':'京东方A','002475.SZ':'立讯精密',
-  '300308.SZ':'中际旭创','002230.SZ':'科大讯飞','600887.SS':'伊利股份','601012.SS':'隆基绿能','688041.SS':'海光信息'
+  '300308.SZ':'中际旭创','002230.SZ':'科大讯飞','600887.SS':'伊利股份','601012.SS':'隆基绿能','688041.SS':'海光信息',
+  '000823.SZ':'超声电子','600667.SS':'太极实业','603083.SS':'剑桥科技'
 };
 const A_STOCK_FALLBACK = Object.entries(CN_NAMES)
   .filter(([symbol]) => symbol.endsWith('.SS') || symbol.endsWith('.SZ'))
@@ -285,6 +286,21 @@ async function resolveChineseStockName(symbol) {
     if (name && name !== '-' && /[\u3400-\u9fff]/.test(name)) {
       chineseNameCache.set(symbol, name);
       return name;
+    }
+  } catch {}
+  try {
+    const marketCode = `${symbol.endsWith('.SS') ? 'sh' : 'sz'}${code}`;
+    const response = await fetch(`https://hq.sinajs.cn/list=${marketCode}`, {
+      headers:{'User-Agent':'Mozilla/5.0 AllenStock/1.10','Referer':'https://finance.sina.com.cn/'},
+      signal:AbortSignal.timeout(8000)
+    });
+    if (response.ok) {
+      const text = new TextDecoder('gb18030').decode(await response.arrayBuffer());
+      const name = String(text.match(/="([^,]+)/)?.[1] || '').trim();
+      if (name && /[\u3400-\u9fff]/.test(name)) {
+        chineseNameCache.set(symbol, name);
+        return name;
+      }
     }
   } catch {}
   return null;
@@ -645,7 +661,7 @@ async function predictionScorecard(userId){
   return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.10.1', aiConfigured:Boolean(AI_API_KEY) }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.10.2', aiConfigured:Boolean(AI_API_KEY) }));
 app.get('/api/session',async(req,res)=>{
   try{
     const token=cookies(req).allen_session;if(!token)return res.json({authenticated:false,user:null});
@@ -749,8 +765,8 @@ app.get('/api/admin/backup',auth,admin,async(_req,res)=>{
       pool.query('SELECT id,user_id,alert_key,symbol,title,content,level,read_at,created_at FROM user_alerts ORDER BY id'),
       pool.query('SELECT id,user_id,symbol,name,score,status,price,data_date,created_at FROM signal_snapshots ORDER BY id')
     ]);
-    backup={version:'1.10.1',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
-  }else backup={version:'1.10.1',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
+    backup={version:'1.10.2',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
+  }else backup={version:'1.10.2',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
   res.setHeader('Content-Disposition',`attachment; filename="allen-stock-backup-${createdAt.slice(0,10)}.json"`);res.json(backup);
 });
 
