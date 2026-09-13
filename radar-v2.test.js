@@ -5,7 +5,7 @@ import {validateCriteria,extractEvidence,normalizeFeed,historyChange,buildRadar}
 import {registerRadar} from './radar-api.js';
 
 const criteria=validateCriteria({days:30,announcementLimit:1000,risk:'高',maxRunup:30});
-const tomorrow=new Date(Date.now()+86400000).toISOString().slice(0,10);
+const tomorrow=new Date(Date.parse(criteria.window.start+'T00:00:00Z')+86400000).toISOString().slice(0,10);
 const futureText=tomorrow.replace(/(\d{4})-(\d{2})-(\d{2})/,'$1年$2月$3日');
 const body=('公司计划于'+futureText+'召开产品发布会。预计对营业收入产生积极影响，具体以审计数据为准。市场需求仍有不确定性。').repeat(4);
 const feedRows=Array.from({length:70},(_,i)=>({art_code:'AN20260913000'+i,title:'公司'+i+'新产品发布公告',notice_date:tomorrow,
