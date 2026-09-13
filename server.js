@@ -3,6 +3,9 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { radarWindow, radarCandidate, mapLimit } from './opportunity.js';
+const radarReports = [];
+const radarBusy = new Set();
 
 const app = express();
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -72,6 +75,10 @@ async function initUsers() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS opportunity_reports (
+    id TEXT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), result_json JSONB NOT NULL
+  )`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins INTEGER NOT NULL DEFAULT 0`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`);
   await pool.query(`CREATE TABLE IF NOT EXISTS user_sessions (
@@ -661,7 +668,7 @@ async function predictionScorecard(userId){
   return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.10.2', aiConfigured:Boolean(AI_API_KEY) }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.11.0', aiConfigured:Boolean(AI_API_KEY) }));
 app.get('/api/session',async(req,res)=>{
   try{
     const token=cookies(req).allen_session;if(!token)return res.json({authenticated:false,user:null});
@@ -765,8 +772,8 @@ app.get('/api/admin/backup',auth,admin,async(_req,res)=>{
       pool.query('SELECT id,user_id,alert_key,symbol,title,content,level,read_at,created_at FROM user_alerts ORDER BY id'),
       pool.query('SELECT id,user_id,symbol,name,score,status,price,data_date,created_at FROM signal_snapshots ORDER BY id')
     ]);
-    backup={version:'1.10.2',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
-  }else backup={version:'1.10.2',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
+    backup={version:'1.11.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
+  }else backup={version:'1.11.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
   res.setHeader('Content-Disposition',`attachment; filename="allen-stock-backup-${createdAt.slice(0,10)}.json"`);res.json(backup);
 });
 
@@ -908,42 +915,46 @@ app.post('/api/ai/chat', auth, async (req,res) => {
   }
 });
 
-app.post('/api/ai/screen', auth, async (req,res) => {
+app.get('/api/ai/radar-history', auth, async (req,res) => {
   try {
-    if (!AI_API_KEY) { const error=new Error('管理员尚未配置 AI_API_KEY'); error.code='AI_NOT_CONFIGURED'; throw error; }
-    const remaining = useAiQuota(req.user.username);
-    if (remaining === false) return res.status(429).json({error:'今日 AI 使用次数已达到上限，请明天再试'});
-    const horizon = ['短期','中期','长期'].includes(req.body.horizon) ? req.body.horizon : '中期';
-    const risk = ['低','中','高'].includes(req.body.risk) ? req.body.risk : '中';
-    const capital = Math.max(0,Math.min(100000000,Number(req.body.capital)||0));
-    let snapshot;
-    try { snapshot = await getLiquidAMarketSnapshot(); }
-    catch {
-      const settled = await Promise.allSettled(A_STOCK_FALLBACK.map(item => getStockData(item.symbol,{withNews:false})));
-      const rows = settled.filter(item => item.status==='fulfilled').map(item => item.value).filter(item => Number.isFinite(item.price)).map(stock => ({
-        ...stock, amount:stock.technical.volume ? stock.technical.volume * stock.price : 0, turnover:null, pe:null, pb:null,
-        marketCap:null, volumeRatio:null, high:stock.technical.high20, low:stock.technical.low20
-      }));
-      snapshot = {rows,total:rows.length,pages:0,fallback:true};
+    const reports=pool?(await pool.query('SELECT result_json FROM opportunity_reports WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10',[req.user.id])).rows.map(r=>r.result_json):radarReports.filter(r=>r.userId===req.user.id).slice(-10).reverse().map(r=>r.result);
+    res.json({reports,durable:!!pool});
+  }catch {res.status(503).json({error:'暂时无法读取报告档案'});}
+});
+app.post('/api/ai/screen', auth, async (req,res) => {
+  if(radarBusy.has(req.user.id))return res.status(429).json({error:'上一份雷达报告仍在生成，请稍后查看'});
+  let window;
+  try{window=radarWindow(req.body.days??30)}catch(error){return res.status(400).json({error:error.message})}
+  radarBusy.add(req.user.id);
+  try {
+    const risk=['低','中','高'].includes(req.body.risk)?req.body.risk:'中';
+    const snapshot=await getLiquidAMarketSnapshot();
+    // Evenly sample the liquidity-ranked universe, not simply today's biggest winners.
+    const rows=snapshot.rows;
+    const sampled=Array.from({length:Math.min(20,rows.length)},(_,i)=>rows[Math.floor(i*rows.length/Math.min(20,rows.length))]);
+    const checked=await mapLimit(sampled,4,async stock=>{
+      const research=await getResearchData(stock.symbol);
+      return {hasEvidence:(research.announcements||[]).length>0,candidate:radarCandidate(stock,research,window,risk)};
+    });
+    const candidates=checked.filter(r=>r.ok&&r.value.candidate).map(r=>r.value.candidate).sort((a,b)=>b.priority-a.priority).slice(0,6);
+    const result={id:crypto.randomUUID(),createdAt:new Date().toISOString(),window,risk,candidates,
+      coverage:{marketSample:rows.length,researched:sampled.length,withAnnouncements:checked.filter(r=>r.ok&&r.value.hasEvidence).length,failed:checked.filter(r=>!r.ok||!r.value.hasEvidence).length},
+      durable:!!pool,answer:'本次仅提供公告标题线索。没有可靠日期的线索不属于窗口内已确认机会。',aiStatus:'未调用',
+      limitation:'流动性样本中均匀抽取最多20只核查最近公告，不是全市场事件扫描。日期是计划而非结果；不提供未经验证的上涨概率。'};
+    if(AI_API_KEY&&candidates.length){
+      const quota=useAiQuota(req.user.username);
+      if(quota!==false){
+        try{
+          result.answer=await callAi([{role:'system',content:'你是中文证券研究助手。只能解释给定候选和公告标题证据，不新增股票、事件、日期、价格或概率。公告标题不是全文。每只分别写：可能的受益传导链（明确为假设）、必须核验的证据、反面可能、窗口内催化日期是否未知。不得把签合同等同于利润增长，不得说必涨。没有证据就说未知。不提供买入指令。普通中文输出。'},{role:'user',content:JSON.stringify({window,risk,candidates})}]);
+          result.aiStatus='AI解释，非已证实事实';
+        }catch {result.aiStatus='AI暂不可用，保留证据线索';}
+      }else result.aiStatus='今日AI额度已用完，保留证据线索';
     }
-    const ranked = snapshot.rows.map(stock => ({...stock,screenScore:scoreMarketStock(stock,horizon,risk)}))
-      .sort((a,b)=>b.screenScore-a.screenScore).slice(0,16);
-    if (ranked.length < 5) throw new Error('当前可核验的 A 股行情不足，请稍后重试');
-    const candidates = ranked.map(stock => ({
-      股票名称:stock.name, 股票代码:stock.code, 当前价格:stock.price, 今日涨跌幅:stock.changePct,
-      今日成交额亿元:stock.amount ? Number((stock.amount/1e8).toFixed(2)) : null,
-      换手率百分比:stock.turnover, 市盈率:stock.pe, 市净率:stock.pb,
-      总市值亿元:stock.marketCap ? Number((stock.marketCap/1e8).toFixed(2)) : null,
-      量比:stock.volumeRatio, 日内价格位置百分比:stock.high>stock.low?Number((((stock.price-stock.low)/(stock.high-stock.low))*100).toFixed(1)):null,
-      量化筛选分:stock.screenScore
-    }));
-    const system = `你是谨慎的中文 A 股研究助手。候选范围来自沪深 A 股中成交较活跃的扩大样本，与国信金太阳可按六位代码搜索的股票代码一致，但不连接证券账户，也不能下单。\n仅根据提供的已核验行情候选比较，不新增股票，不猜测财务数据、新闻或长期基本面。\n只输出普通中文，不使用Markdown井号或星号。先说明这是扩大样本筛选但不是全部A股逐只深度研究，然后给出3至5只优先研究对象。每只包含：代码、入选理由、主要风险、关注条件、什么情况下应放弃。最后说明组合层面的仓位与核验原则，不得保证收益或使用全仓指令。专业指标同时用通俗中文解释。`;
-    const user = `用户条件：投资周期=${horizon}；风险偏好=${risk}；参考资金=${capital||'未填写'}元。\n候选数据：${JSON.stringify(candidates)}`;
-    const answer = await callAi([{role:'system',content:system},{role:'user',content:user}]);
-    res.json({answer,candidates:candidates.slice(0,5),sampleSize:snapshot.rows.length,marketTotal:snapshot.total,horizon,risk,capital,source:snapshot.fallback?'备用样本':'沪深A股活跃样本',remaining});
-  } catch(error) {
-    res.status(error.code==='AI_NOT_CONFIGURED'?503:502).json({error:error.message});
-  }
+    if(pool)await pool.query('INSERT INTO opportunity_reports(id,user_id,result_json) VALUES($1,$2,$3)',[result.id,req.user.id,JSON.stringify(result)]);
+    else {radarReports.push({userId:req.user.id,result});if(radarReports.length>200)radarReports.shift();}
+    res.json(result);
+  }catch(error){res.status(502).json({error:'机会雷达未完成：'+error.message});}
+  finally{radarBusy.delete(req.user.id);}
 });
 
 app.get('/styles.css', (_req, res) => res.sendFile(path.join(root, 'styles.css')));
