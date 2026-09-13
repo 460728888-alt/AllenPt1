@@ -17,3 +17,9 @@
 .radar-candidate{min-width:0}.radar-candidate li{margin:14px 0}.radar-candidate a{overflow-wrap:anywhere;color:#245dcc}
 .radar-candidate p{line-height:1.7}.radar-candidate ul{padding-left:20px}
 @media(max-width:1000px){:root .radar-grid{grid-template-columns:1fr}}
+.radar-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:24px}.radar-filters label{display:grid;gap:8px}.radar-filters button{min-height:48px}
+.radar-intro{border-top:4px solid #367bea}.radar-summary b{font-size:28px;color:#2164c7}
+.radar-evidence{margin:16px 0;padding:14px;border:1px solid #dbe5f0;border-radius:12px}.radar-evidence summary{cursor:pointer;font-weight:600;line-height:1.6}
+.radar-evidence blockquote{margin:10px 0;padding:10px 14px;border-left:3px solid #6595de;background:#f3f7fc;line-height:1.7;overflow-wrap:anywhere}
+.journal-review{display:grid;gap:10px}.journal-review textarea{min-height:90px}progress{width:100%;height:14px}
+@media(max-width:760px){.radar-filters{grid-template-columns:1fr}.radar-summary .g4{grid-template-columns:1fr 1fr}}
