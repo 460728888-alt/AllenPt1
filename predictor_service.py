@@ -30,7 +30,7 @@ class ForecastRequest(BaseModel):
 def pipeline():
     from chronos import BaseChronosPipeline
     return BaseChronosPipeline.from_pretrained(
-        MODEL_ID, device_map="cpu", torch_dtype=torch.float32
+        MODEL_ID, device_map="cpu", dtype=torch.float32
     )
 
 
@@ -72,7 +72,7 @@ def forecast(request: ForecastRequest, authorization: str | None = Header(defaul
     if not horizons:
         raise HTTPException(status_code=400,detail="预测周期无效")
     quantiles,mean=pipeline().predict_quantiles(
-        inputs=torch.tensor(prices[-512:]),
+        context=torch.tensor(prices[-512:]),
         prediction_length=max(horizons),
         quantile_levels=QUANTILE_LEVELS,
     )
