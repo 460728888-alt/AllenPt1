@@ -1,0 +1,287 @@
+{
+  "schema": 1,
+  "engine": "LightGBM LambdaRank",
+  "version": "2026.09.20-2347",
+  "trainedAt": "2026-09-20T23:47:25.936080+00:00",
+  "dataThrough": "2020-07-03",
+  "universeSize": 1006,
+  "trainingRows": 314628,
+  "features": [
+    "return5",
+    "return20",
+    "return60",
+    "maGap5To20",
+    "maGap20To60",
+    "volatility20",
+    "volumeRatio5To20",
+    "distanceToHigh20",
+    "distanceToLow20",
+    "revenueGrowth",
+    "profitGrowth",
+    "netMargin",
+    "debtRatio",
+    "timedEventCount",
+    "positiveEvidenceCount",
+    "negativeEvidenceCount",
+    "bodyEvidenceCount"
+  ],
+  "horizons": {
+    "5": {
+      "file": "lambdarank-5d.json",
+      "bestIteration": 2,
+      "calibration": [
+        {
+          "min": -0.04343210220772275,
+          "max": -0.014974095004462255,
+          "mid": -0.018422193587245585,
+          "outperformRate": 45.0,
+          "samples": 7225
+        },
+        {
+          "min": -0.014974095004462255,
+          "max": -0.010915799671467663,
+          "mid": -0.010915799671467663,
+          "outperformRate": 51.9,
+          "samples": 7225
+        },
+        {
+          "min": -0.010915799671467663,
+          "max": -0.009886623075300728,
+          "mid": -0.010915799671467663,
+          "outperformRate": 46.6,
+          "samples": 7224
+        },
+        {
+          "min": -0.009886623075300728,
+          "max": -0.005714629616174331,
+          "mid": -0.007767784013762747,
+          "outperformRate": 52.5,
+          "samples": 7225
+        },
+        {
+          "min": -0.005714629616174331,
+          "max": -0.002675158666513578,
+          "mid": -0.005714629616174331,
+          "outperformRate": 48.0,
+          "samples": 7224
+        },
+        {
+          "min": -0.002675158666513578,
+          "max": -0.002269348110133017,
+          "mid": -0.002269348110133017,
+          "outperformRate": 54.0,
+          "samples": 7225
+        },
+        {
+          "min": -0.002269348110133017,
+          "max": -0.002269348110133017,
+          "mid": -0.002269348110133017,
+          "outperformRate": 52.8,
+          "samples": 7224
+        },
+        {
+          "min": -0.002269348110133017,
+          "max": 0.002798430477593139,
+          "mid": -9.024661120295542e-05,
+          "outperformRate": 48.7,
+          "samples": 7225
+        },
+        {
+          "min": 0.002798430477593139,
+          "max": 0.010641535613710439,
+          "mid": 0.005819739470532276,
+          "outperformRate": 49.7,
+          "samples": 7224
+        },
+        {
+          "min": 0.010641535613710439,
+          "max": 0.05193772205845162,
+          "mid": 0.012872249356112739,
+          "outperformRate": 50.7,
+          "samples": 7225
+        }
+      ],
+      "metrics": {
+        "testRows": 72246,
+        "ndcgAt20": 0.3767,
+        "topDecileMeanExcess": 0.5626,
+        "topDecileHitRate": 49.9,
+        "approved": false
+      }
+    },
+    "20": {
+      "file": "lambdarank-20d.json",
+      "bestIteration": 4,
+      "calibration": [
+        {
+          "min": -0.062088496995717904,
+          "max": -0.03683116837438351,
+          "mid": -0.04419995310196936,
+          "outperformRate": 42.7,
+          "samples": 7218
+        },
+        {
+          "min": -0.03683116837438351,
+          "max": -0.030136156449439302,
+          "mid": -0.036471736246826425,
+          "outperformRate": 44.8,
+          "samples": 7218
+        },
+        {
+          "min": -0.030136156449439302,
+          "max": -0.027304788311799187,
+          "mid": -0.028499905956754144,
+          "outperformRate": 46.5,
+          "samples": 7218
+        },
+        {
+          "min": -0.027304788311799187,
+          "max": -0.02102029764661121,
+          "mid": -0.024265538789079052,
+          "outperformRate": 48.3,
+          "samples": 7217
+        },
+        {
+          "min": -0.02102029764661121,
+          "max": -0.018513756902938244,
+          "mid": -0.02000761212677868,
+          "outperformRate": 49.5,
+          "samples": 7218
+        },
+        {
+          "min": -0.018513756902938244,
+          "max": -0.014038465168772003,
+          "mid": -0.01655677880282483,
+          "outperformRate": 53.4,
+          "samples": 7218
+        },
+        {
+          "min": -0.014038465168772003,
+          "max": -0.009499683728196408,
+          "mid": -0.01258855287601975,
+          "outperformRate": 52.1,
+          "samples": 7217
+        },
+        {
+          "min": -0.009499683728196408,
+          "max": -0.003385666768826411,
+          "mid": -0.005761803720680981,
+          "outperformRate": 53.4,
+          "samples": 7218
+        },
+        {
+          "min": -0.003385666768826411,
+          "max": 0.004836803082862106,
+          "mid": -0.0005403563260081993,
+          "outperformRate": 52.0,
+          "samples": 7218
+        },
+        {
+          "min": 0.004836803082862106,
+          "max": 0.0879403292772005,
+          "mid": 0.01671150705947378,
+          "outperformRate": 57.5,
+          "samples": 7218
+        }
+      ],
+      "metrics": {
+        "testRows": 72178,
+        "ndcgAt20": 0.4125,
+        "topDecileMeanExcess": 2.7738,
+        "topDecileHitRate": 57.0,
+        "approved": true
+      }
+    },
+    "60": {
+      "file": "lambdarank-60d.json",
+      "bestIteration": 1,
+      "calibration": [
+        {
+          "min": -0.02027078500993873,
+          "max": -0.008917115599984187,
+          "mid": -0.018616790980661463,
+          "outperformRate": 41.3,
+          "samples": 7234
+        },
+        {
+          "min": -0.008917115599984187,
+          "max": -0.005946193737768755,
+          "mid": -0.008509038371912945,
+          "outperformRate": 49.9,
+          "samples": 7233
+        },
+        {
+          "min": -0.005946193737768755,
+          "max": -0.0035135813486752068,
+          "mid": -0.005642481840350533,
+          "outperformRate": 52.7,
+          "samples": 7233
+        },
+        {
+          "min": -0.0035135813486752068,
+          "max": -0.0035135813486752068,
+          "mid": -0.0035135813486752068,
+          "outperformRate": 46.3,
+          "samples": 7233
+        },
+        {
+          "min": -0.0035135813486752068,
+          "max": -0.0021765324803889106,
+          "mid": -0.0024499930327068907,
+          "outperformRate": 53.0,
+          "samples": 7234
+        },
+        {
+          "min": -0.0021765324803889106,
+          "max": 0.00022909713583477146,
+          "mid": 0.00022909713583477146,
+          "outperformRate": 52.1,
+          "samples": 7233
+        },
+        {
+          "min": 0.00022909713583477146,
+          "max": 0.0011472825669391776,
+          "mid": 0.0011472825669391776,
+          "outperformRate": 43.8,
+          "samples": 7233
+        },
+        {
+          "min": 0.0011472825669391776,
+          "max": 0.0026590573271695404,
+          "mid": 0.0024099422630469085,
+          "outperformRate": 55.9,
+          "samples": 7233
+        },
+        {
+          "min": 0.0026590573271695404,
+          "max": 0.008557498186351958,
+          "mid": 0.00586582008908675,
+          "outperformRate": 54.8,
+          "samples": 7233
+        },
+        {
+          "min": 0.008557498186351958,
+          "max": 0.025085103455114055,
+          "mid": 0.010595342292221567,
+          "outperformRate": 50.1,
+          "samples": 7234
+        }
+      ],
+      "metrics": {
+        "testRows": 72333,
+        "ndcgAt20": 0.3712,
+        "topDecileMeanExcess": 4.7419,
+        "topDecileHitRate": 51.5,
+        "approved": false
+      }
+    }
+  },
+  "split": {
+    "trainBefore": "2019-10-08",
+    "validationBefore": "2020-02-20"
+  },
+  "validation": {
+    "approved": false,
+    "reason": "全部5/20/60日模型须在时间外测试集达到最低样本、正超额收益及52%前十分位胜率"
+  }
+}
