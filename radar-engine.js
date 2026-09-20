@@ -100,18 +100,26 @@ export async function buildRadar(criteria,deps,progress=()=>{}){
    done++;progress('核验历史涨幅、财务和公司业务',done,deep.length);
    return rankIdea({...idea,name:r?.name&&r.name!==idea.symbol?r.name:idea.name,price:q?.price??idea.price,
      quoteAt:q?.marketTime?new Date(q.marketTime*1000).toISOString():null,return20:historyChange(q?.history,20),return60:historyChange(q?.history,60),
+     history:q?.history||[],technical:q?.technical||null,
      company:r?.company?{industry:r.company.industry,business:r.company.business?.slice(0,800)}:null,
      finance:r?.finance?{reportDate:r.finance.reportDate,noticeDate:r.finance.noticeDate,revenueGrowth:r.finance.revenueGrowth,profitGrowth:r.finance.profitGrowth,netMargin:r.finance.netMargin,debtRatio:r.finance.debtRatio}:null},window,risk);
  });
  const assessed=enriched.filter(x=>x.ok).map(x=>x.value);
- const excluded=assessed.filter(i=>!Number.isFinite(i.return20)||i.return20>maxRunup).map(i=>({symbol:i.symbol,name:i.name,reason:Number.isFinite(i.return20)?`20日涨幅${i.return20}%超过上限${maxRunup}%`:'未取得20交易日历史价格，不能核验涨幅条件'}));
- const candidates=assessed.filter(i=>!excluded.some(e=>e.symbol===i.symbol)).sort((a,b)=>b.priority-a.priority||a.symbol.localeCompare(b.symbol)).slice(0,8);
+ const modelDays=window.days<=7?5:window.days<=30?20:60;
+ const ranked=deps.ranker?deps.ranker(assessed,modelDays):{status:{engine:'证据规则',active:false,message:'排序模型未接入'},items:assessed.map(idea=>({...idea,modelRanking:null}))};
+ const rankedAssessed=ranked.items;
+ const excluded=rankedAssessed.filter(i=>!Number.isFinite(i.return20)||i.return20>maxRunup).map(i=>({symbol:i.symbol,name:i.name,reason:Number.isFinite(i.return20)?`20日涨幅${i.return20}%超过上限${maxRunup}%`:'未取得20交易日历史价格，不能核验涨幅条件'}));
+ const candidates=rankedAssessed.filter(i=>!excluded.some(e=>e.symbol===i.symbol)).sort((a,b)=>{
+   if(ranked.status.active)return (a.modelRanking?.rank??999)-(b.modelRanking?.rank??999)||b.priority-a.priority;
+   return b.priority-a.priority||a.symbol.localeCompare(b.symbol);
+ }).slice(0,8);
  const coverage={marketSample:market.rows.length,marketTotal:market.total,marketPages:market.pages,requestedAnnouncements:announcementLimit,
    announcements:feed.items.length,announcementPages:feed.pages,announcementFailedPages:feed.failedPages,uniqueStocks:grouped.size,titleMatches:titleMatches.length,
    researched:selected.length,withAnnouncements:checked.filter(x=>x.ok).length,failed:checked.filter(x=>!x.ok).length,
    fullBodies:checked.filter(x=>x.ok).reduce((n,x)=>n+x.value.evidence.filter(e=>e.bodyRead).length,0),assessed:assessed.length,
    oldestPublication:items.map(i=>i.publishedAt).sort()[0]||null,marketAvailable:marketResult.status==='fulfilled'};
  const result={schema:2,createdAt:new Date().toISOString(),window,risk,criteria,candidates,excluded,coverage,
+   model:{...ranked.status,horizonDays:modelDays,candidateCount:assessed.length},
    answer:'本次依据公告原文、历史价格及可取得的财务资料形成线索。请核验事件兑现与市场预期差。',aiStatus:'未调用',
    limitation:'扫描最近公告，不等于覆盖全部股票或完整未来日历。正文优先核验40/60家公司，行情财务深入核验最多12家，展示最多8家；未核验公司不代表没有机会。'};
  if(candidates.length&&deps.ai){progress('生成受益逻辑与反面推演',0,1);try{result.answer=await deps.ai(result);result.aiStatus='AI推断，依据列出的原文片段'}catch{result.aiStatus='AI不可用，保留真实证据与规则结果'}}

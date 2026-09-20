@@ -6,7 +6,7 @@ export async function initRadarTables(pool){if(!pool)return;await pool.query(`CR
  id TEXT PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  report_id TEXT NOT NULL,symbol TEXT NOT NULL,data_json JSONB NOT NULL,
  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,report_id,symbol))`);}
-export function registerRadar({app,auth,pool,market,research,quote,publicJson,ai}){
+export function registerRadar({app,auth,pool,market,research,quote,publicJson,ai,ranker}){
  const jobs=new Map(),reports=[],journal=new Map(),bodyCache=new Map(),feedCache=new Map();
  const active=id=>[...jobs.values()].find(j=>j.userId===id&&j.status==='running');
  const save=async(userId,r)=>{if(pool)await pool.query('INSERT INTO opportunity_reports(id,user_id,result_json) VALUES($1,$2,$3)',[r.id,userId,JSON.stringify(r)]);else{reports.push({userId,result:r});if(reports.length>200)reports.shift();}};
@@ -49,7 +49,7 @@ export function registerRadar({app,auth,pool,market,research,quote,publicJson,ai
    const id=crypto.randomUUID(),job={id,userId:req.user.id,started:Date.now(),status:'running',stage:'准备扫描',completed:0,total:1};jobs.set(id,job);
    res.status(202).json({jobId:id});
    void (async()=>{try{
-     const result=await buildRadar(criteria,{market,research,quote,feed,content,ai:ai?result=>ai(req.user.username,result):null},(stage,completed,total)=>Object.assign(job,{stage,completed,total}));
+     const result=await buildRadar(criteria,{market,research,quote,feed,content,ranker,ai:ai?result=>ai(req.user.username,result):null},(stage,completed,total)=>Object.assign(job,{stage,completed,total}));
      Object.assign(result,{id,createdAt:new Date().toISOString(),durable:!!pool});await save(req.user.id,result);Object.assign(job,{status:'done',result,stage:'已保存'});
    }catch(error){Object.assign(job,{status:'failed',error:error.message,stage:'扫描未完成'})}})();
  });

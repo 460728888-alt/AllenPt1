@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "engine": "LightGBM LambdaRank",
+  "version": "pending-training",
+  "features": [
+    "return5", "return20", "return60", "maGap5To20", "maGap20To60",
+    "volatility20", "volumeRatio5To20", "distanceToHigh20", "distanceToLow20",
+    "revenueGrowth", "profitGrowth", "netMargin", "debtRatio", "timedEventCount",
+    "positiveEvidenceCount", "negativeEvidenceCount", "bodyEvidenceCount"
+  ],
+  "horizons": {},
+  "validation": {
+    "approved": false,
+    "reason": "等待使用真实历史截面数据训练和时间外验证"
+  }
+}
+
