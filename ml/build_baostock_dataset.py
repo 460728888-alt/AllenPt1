@@ -1,74 +1,135 @@
 #!/usr/bin/env python3
-"""Build a reproducible CSI 300 + CSI 500 LightGBM training dataset.
+"""Build an A-share ranking dataset over HTTPS.
 
-BaoStock supplies adjusted A-share daily bars without an account token.  This
-builder deliberately uses only information known on each trading date.  The
-financial and announcement features remain neutral until a disclosure-date-
-safe point-in-time source is added; they are never backfilled from today's
-company facts.
+The filename is retained for workflow compatibility.  BaoStock's custom TCP
+service is often unreachable from cloud CI runners, so this revision uses
+Eastmoney's public HTTPS quote/history endpoints with retries and records the
+actual source in metadata.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import random
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
-import baostock as bs
 import numpy as np
 import pandas as pd
 
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 AllenStock/1.16",
+    "Referer": "https://quote.eastmoney.com/",
+}
 HORIZONS = (5, 20, 60)
-PRICE_FIELDS = (
-    "date,code,open,high,low,close,preclose,volume,amount,"
-    "pctChg,turn,tradestatus,isST"
-)
 
 
-def query_rows(result) -> list[list[str]]:
-    rows: list[list[str]] = []
-    while result.error_code == "0" and result.next():
-        rows.append(result.get_row_data())
-    if result.error_code != "0":
-        raise RuntimeError(f"BaoStock error {result.error_code}: {result.error_msg}")
-    return rows
+def get_json(url: str, attempts: int = 5) -> dict:
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            request = Request(url, headers=HEADERS)
+            with urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8", errors="replace"))
+        except Exception as exc:
+            last = exc
+            time.sleep(1.0 + attempt * 1.5)
+    raise RuntimeError(f"HTTPS request failed after {attempts} attempts: {last}")
 
 
-def current_csi800() -> list[str]:
-    """Return the deduplicated current CSI 300 and CSI 500 constituents."""
-    codes: set[str] = set()
-    for query in (bs.query_hs300_stocks, bs.query_zz500_stocks):
-        result = query()
-        rows = query_rows(result)
-        code_index = result.fields.index("code")
-        codes.update(row[code_index] for row in rows if row[code_index])
-    if len(codes) < 600:
-        raise RuntimeError(f"constituent query returned only {len(codes)} symbols")
-    return sorted(codes)
+def universe(limit: int) -> list[dict]:
+    params = {
+        "pn": 1,
+        "pz": limit,
+        "po": 1,
+        "np": 1,
+        "fltt": 2,
+        "invt": 2,
+        "fid": "f6",
+        "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
+        "fields": "f12,f13,f14,f6",
+    }
+    endpoints = [
+        "https://82.push2.eastmoney.com/api/qt/clist/get?",
+        "https://push2.eastmoney.com/api/qt/clist/get?",
+    ]
+    for endpoint in endpoints:
+        try:
+            rows = (get_json(endpoint + urlencode(params)).get("data") or {}).get("diff") or []
+            items = [
+                {
+                    "code": str(row.get("f12", "")),
+                    "market": int(row.get("f13", 0)),
+                    "name": str(row.get("f14", "")),
+                }
+                for row in rows
+                if str(row.get("f12", "")).isdigit()
+            ]
+            if len(items) >= min(80, limit):
+                return items[:limit]
+        except Exception as exc:
+            print(f"universe endpoint failed: {exc}", flush=True)
+
+    # Official disclosure-site company list fallback.  Use a deterministic
+    # sample rather than silently changing the sample on every run.
+    payload = get_json("https://www.cninfo.com.cn/new/data/szse_stock.json")
+    items = []
+    for row in payload.get("stockList") or []:
+        code = str(row.get("code", ""))
+        if row.get("category") != "A股" or len(code) != 6 or not code.startswith(("0", "3", "6")):
+            continue
+        items.append({
+            "code": code,
+            "market": 1 if code.startswith("6") else 0,
+            "name": str(row.get("zwjc", "")),
+        })
+    random.Random(20260921).shuffle(items)
+    return items[:limit]
 
 
-def history(code: str, start: str, end: str) -> pd.DataFrame:
-    result = bs.query_history_k_data_plus(
-        code,
-        PRICE_FIELDS,
-        start_date=start,
-        end_date=end,
-        frequency="d",
-        adjustflag="2",  # forward adjusted; avoids artificial split/dividend jumps
-    )
-    rows = query_rows(result)
-    frame = pd.DataFrame(rows, columns=result.fields)
+def bars(code: str, market: int, count: int) -> pd.DataFrame:
+    params = {
+        "secid": f"{market}.{code}",
+        "klt": 101,
+        "fqt": 1,
+        "lmt": count,
+        "end": "20500101",
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+    }
+    hosts = ["33", "7", "17", "28", "40", "48", "63", "82"]
+    random.Random(code).shuffle(hosts)
+    last: Exception | None = None
+    payload: dict | None = None
+    for host in hosts:
+        try:
+            url = f"https://{host}.push2his.eastmoney.com/api/qt/stock/kline/get?" + urlencode(params)
+            candidate = get_json(url, attempts=2)
+            if (candidate.get("data") or {}).get("klines"):
+                payload = candidate
+                break
+        except Exception as exc:
+            last = exc
+    if payload is None:
+        raise RuntimeError(f"all HTTPS history hosts failed: {last}")
+
+    raw = (payload.get("data") or {}).get("klines") or []
+    columns = [
+        "date", "open", "close", "high", "low", "volume", "amount",
+        "amplitude", "pct", "change", "turnover",
+    ]
+    frame = pd.DataFrame([row.split(",") for row in raw], columns=columns)
     if frame.empty:
         return frame
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
-    numeric = [
-        "open", "high", "low", "close", "preclose", "volume", "amount",
-        "pctChg", "turn", "tradestatus", "isST",
-    ]
-    frame[numeric] = frame[numeric].apply(pd.to_numeric, errors="coerce")
-    frame["symbol"] = code.split(".")[-1]
+    for column in columns[1:]:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame["symbol"] = code
     return frame.dropna(subset=["date", "close"]).sort_values("date")
 
 
@@ -77,7 +138,6 @@ def add_features(frame: pd.DataFrame, benchmark: pd.Series) -> pd.DataFrame:
     close = out["close"]
     volume = out["volume"].replace(0, np.nan)
     daily_return = close.pct_change(fill_method=None) * 100
-
     out["return5"] = close.pct_change(5, fill_method=None) * 100
     out["return20"] = close.pct_change(20, fill_method=None) * 100
     out["return60"] = close.pct_change(60, fill_method=None) * 100
@@ -90,10 +150,6 @@ def add_features(frame: pd.DataFrame, benchmark: pd.Series) -> pd.DataFrame:
     out["volumeRatio5To20"] = volume.rolling(5).mean() / volume.rolling(20).mean()
     out["distanceToHigh20"] = (close / close.rolling(20).max() - 1) * 100
     out["distanceToLow20"] = (close / close.rolling(20).min() - 1) * 100
-
-    # Neutral placeholders.  Using today's financial facts historically would
-    # leak the future, so these stay constant until report-publication dates are
-    # available for every observation.
     out["revenueGrowth"] = 0.0
     out["profitGrowth"] = 0.0
     out["netMargin"] = 0.0
@@ -102,7 +158,6 @@ def add_features(frame: pd.DataFrame, benchmark: pd.Series) -> pd.DataFrame:
     out["positiveEvidenceCount"] = 0.0
     out["negativeEvidenceCount"] = 0.0
     out["bodyEvidenceCount"] = 0.0
-
     benchmark_close = out["date"].map(benchmark)
     for horizon in HORIZONS:
         stock_future = close.shift(-horizon) / close - 1
@@ -115,45 +170,47 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start", default="2018-01-01")
     parser.add_argument("--end", default=date.today().isoformat())
-    parser.add_argument("--limit", type=int, default=0, help="pilot only; 0 means full CSI 800")
-    parser.add_argument("--pause", type=float, default=0.04)
-    parser.add_argument("--output", type=Path, default=Path("ml/data/baostock-csi800.parquet"))
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--output", type=Path, default=Path("ml/data/a-share-https.parquet"))
     args = parser.parse_args()
 
-    login = bs.login()
-    if login.error_code != "0":
-        raise SystemExit(f"BaoStock login failed {login.error_code}: {login.error_msg}")
-    failures: list[dict[str, str]] = []
-    try:
-        symbols = current_csi800()
-        if args.limit:
-            symbols = symbols[: args.limit]
-        benchmark_frame = history("sh.000001", args.start, args.end)
-        if benchmark_frame.empty:
-            raise RuntimeError("Shanghai Composite history is empty")
-        benchmark = benchmark_frame.set_index("date")["close"]
+    stock_count = args.limit if args.limit > 0 else 800
+    start = pd.Timestamp(args.start)
+    end = pd.Timestamp(args.end)
+    bars_needed = max(500, int((end - start).days / 7 * 5) + 140)
+    names = universe(stock_count)
+    if len(names) < 80:
+        raise SystemExit(f"only {len(names)} A-share symbols found")
 
-        frames: list[pd.DataFrame] = []
-        for index, code in enumerate(symbols, 1):
+    benchmark_frame = bars("000001", 1, bars_needed)
+    benchmark = benchmark_frame.set_index("date")["close"]
+    frames: list[pd.DataFrame] = []
+    failures: list[dict] = []
+    with ThreadPoolExecutor(max_workers=max(1, min(args.workers, 6))) as executor:
+        jobs = {
+            executor.submit(bars, item["code"], item["market"], bars_needed): item
+            for item in names
+        }
+        for index, future in enumerate(as_completed(jobs), 1):
+            item = jobs[future]
             try:
-                frame = history(code, args.start, args.end)
+                frame = future.result()
+                frame = frame[(frame["date"] >= start) & (frame["date"] <= end)]
                 if len(frame) >= 380:
                     frames.append(add_features(frame, benchmark))
                 else:
-                    failures.append({"code": code, "reason": f"only {len(frame)} bars"})
-            except Exception as exc:  # one suspended/delisted symbol must not abort all training
-                failures.append({"code": code, "reason": str(exc)})
-            if index % 25 == 0 or index == len(symbols):
+                    failures.append({**item, "reason": f"only {len(frame)} bars"})
+            except Exception as exc:
+                failures.append({**item, "reason": str(exc)})
+            if index % 25 == 0 or index == len(names):
                 print(
-                    f"downloaded {index}/{len(symbols)}; usable={len(frames)}; failed={len(failures)}",
+                    f"downloaded {index}/{len(names)}; usable={len(frames)}; failed={len(failures)}",
                     flush=True,
                 )
-            time.sleep(args.pause)
-    finally:
-        bs.logout()
 
     if not frames:
-        raise SystemExit("no usable histories downloaded")
+        raise SystemExit("no usable HTTPS stock histories downloaded")
     dataset = pd.concat(frames, ignore_index=True)
     columns = [
         "date", "symbol", "return5", "return20", "return60", "maGap5To20",
@@ -164,12 +221,11 @@ def main() -> None:
     ]
     dataset = dataset[columns].replace([np.inf, -np.inf], np.nan)
     dataset = dataset.dropna(subset=["return60", "future_excess_60"])
-    daily_count = dataset.groupby("date")["symbol"].transform("nunique")
-    dataset = dataset[daily_count >= min(80, max(20, len(frames) // 3))]
-    dataset = dataset.sort_values(["date", "symbol"])
+    counts = dataset.groupby("date")["symbol"].transform("nunique")
+    dataset = dataset[counts >= 80].sort_values(["date", "symbol"])
     if dataset["date"].nunique() < 300 or dataset["symbol"].nunique() < 80:
         raise SystemExit(
-            f"insufficient usable data: {dataset.date.nunique()} dates, "
+            f"insufficient HTTPS data: {dataset.date.nunique()} dates, "
             f"{dataset.symbol.nunique()} symbols"
         )
 
@@ -177,21 +233,19 @@ def main() -> None:
     dataset.to_parquet(args.output, index=False)
     metadata = {
         "createdAt": datetime.now(timezone.utc).isoformat(),
-        "source": "BaoStock adjusted daily A-share bars",
-        "sourceUrl": "https://www.baostock.com/",
-        "universe": "current CSI 300 plus current CSI 500 constituents",
-        "requestedSymbols": len(symbols),
+        "source": "Eastmoney public HTTPS adjusted daily bars",
+        "universe": "800 liquid A-share sample; CNINFO deterministic fallback",
+        "requestedSymbols": len(names),
         "usableSymbols": int(dataset["symbol"].nunique()),
         "rows": int(len(dataset)),
         "dates": int(dataset["date"].nunique()),
         "dateFrom": str(dataset["date"].min().date()),
         "dateThrough": str(dataset["date"].max().date()),
-        "benchmark": "Shanghai Composite (sh.000001)",
-        "adjustment": "forward adjusted (BaoStock adjustflag=2)",
+        "benchmark": "Shanghai Composite (1.000001)",
         "limitations": [
-            "current-index constituents introduce survivorship bias",
+            "current liquid-universe sampling introduces survivorship bias",
             "financial and announcement features are neutral in this first model",
-            "prices are research data and may differ from broker snapshots",
+            "public endpoint availability is not guaranteed",
         ],
         "failures": failures[:100],
     }
