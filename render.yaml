@@ -24,3 +24,24 @@ services:
         value: https://api.deepseek.com
       - key: AI_MODEL
         value: deepseek-chat
+      - key: FORECAST_API_URL
+        sync: false
+      - key: FORECAST_API_TOKEN
+        sync: false
+      - key: FORECAST_TIMEOUT_MS
+        value: "55000"
+  - type: web
+    name: allen-forecast-model
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r predictor-requirements.txt
+    startCommand: uvicorn predictor_service:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: CHRONOS_MODEL
+        value: amazon/chronos-bolt-tiny
+      - key: FORECAST_API_TOKEN
+        sync: false

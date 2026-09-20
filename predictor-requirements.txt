@@ -1,0 +1,6 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+chronos-forecasting==1.5.3
+torch==2.7.1+cpu
+numpy==2.2.6

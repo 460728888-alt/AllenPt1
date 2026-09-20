@@ -6,6 +6,7 @@ import pg from 'pg';
 import { radarWindow, radarCandidate, mapLimit } from './opportunity.js';
 import {registerRadar,initRadarTables} from './radar-api.js';
 import { modelStatus, rankIdeas } from './ranking-model.js';
+import {foundationForecast,committeeDecision,forecastStatus} from './forecast-client.js';
 const radarReports = [];
 const radarBusy = new Set();
 
@@ -20,6 +21,7 @@ const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
 const memoryAnnouncements = [
+  {id:11,slug:'allen-model-committee-v1-15',title:'Allen模型委员会已接入',content:'趋势预测中心新增Amazon Chronos-Bolt预训练模型接口，并与原有历史统计模型分别展示、相互核验。只有方向一致才标记模型共振；模型分歧或预训练服务不可用时继续等待。尚未训练的LightGBM不会参与投票。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:10,slug:'lambdarank-v1-14',title:'Allen排序模型框架已上线',content:'未来机会雷达已接入 LightGBM LambdaRank 排序接口，并公开显示模型版本、训练样本和时间外验证状态。只有5、20、60日模型文件齐全且通过验证门槛时才会启用；否则自动使用原证据规则，绝不把未训练分数冒充预测概率。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:9,slug:'allen-evidence-v1-12',title:'Allen证据研究与跟踪卡已更新',content:'机会雷达改为扫描最近1000或3000条公告，分层读取正文、检查历史涨幅与财务。新增个人研究卡、原始判断复核和事件时间线。扫描量是公告条数，不代表覆盖全部股票；每份报告显示实际覆盖及缺失。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:8,slug:'research-console-v1-10',title:'全景研究台与预测成绩单已上线',content:'首页升级为适合 iPad 横屏的全景研究台：可在同一屏查看股票池、重点股票、行动价格、核心结论和最新公告。新增评分变化记录、股票详情行动方案卡，以及按5、20、60个交易日自动后验验证的预测成绩单。',level:'更新',active:true,created_at:new Date().toISOString()},
@@ -136,6 +138,7 @@ async function initUsers() {
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('research-console-v1-10','全景研究台与预测成绩单已上线','首页升级为适合 iPad 横屏的全景研究台：可在同一屏查看股票池、重点股票、行动价格、核心结论和最新公告。新增评分变化记录、股票详情行动方案卡，以及按5、20、60个交易日自动后验验证的预测成绩单。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('allen-evidence-v1-12','Allen证据研究与跟踪卡已更新','机会雷达扫描最近1000或3000条公告，分层读取正文、历史涨幅和财务。新增个人研究卡、复核记录和事件时间线。公告条数不等于股票数量；每份报告展示覆盖和缺失。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('lambdarank-v1-14','Allen排序模型框架已上线','未来机会雷达已接入 LightGBM LambdaRank 排序接口，并公开显示模型版本、训练样本和时间外验证状态。只有5、20、60日模型文件齐全且通过验证门槛时才会启用；否则自动使用原证据规则，绝不把未训练分数冒充预测概率。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('allen-model-committee-v1-15','Allen模型委员会已接入','趋势预测中心新增Amazon Chronos-Bolt预训练模型接口，并与原有历史统计模型分别展示、相互核验。只有方向一致才标记模型共振；模型分歧或预训练服务不可用时继续等待。尚未训练的LightGBM不会参与投票。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -627,12 +630,27 @@ async function buildPrediction(rawSymbol) {
   const benchmarkMa20=meanAt(benchmarkRows,benchmarkIndex,20),benchmarkMa60=meanAt(benchmarkRows,benchmarkIndex,60);
   const benchmarkMomentum20=percentChange(benchmarkRows[benchmarkIndex-20]?.close,benchmarkRows[benchmarkIndex]?.close);
   const marketRegime=benchmarkMa20>benchmarkMa60&&benchmarkMomentum20>0?'上升环境':benchmarkMa20<benchmarkMa60&&benchmarkMomentum20<0?'偏弱环境':'震荡环境';
+  const ruleHorizons=[5,20,60].map(days=>analyzeHorizon(comparableRows,benchmarkMap,days));
+  const pretrained=await foundationForecast(comparableRows,[5,20,60]);
+  const foundationByDays=new Map((pretrained.horizons||[]).map(item=>[Number(item.days),item]));
+  const horizons=ruleHorizons.map(rule=>{
+    const foundation=foundationByDays.get(rule.days)||null;
+    return {...rule,foundation,committee:committeeDecision(rule,foundation)};
+  });
+  const confirmed=horizons.filter(item=>item.committee.agreement);
   return {
     symbol:stock.symbol, code:stock.symbol.slice(0,6), name:stock.name, currentPrice:last.close,
     dataThrough:new Date(last.time*1000).toISOString().slice(0,10), benchmark:'上证综合指数', historyDays:comparableRows.length,
     market:{regime:marketRegime,twentyDayAverage:benchmarkMa20,sixtyDayAverage:benchmarkMa60,twentyDayMomentum:benchmarkMomentum20},
-    horizons:[5,20,60].map(days=>analyzeHorizon(comparableRows,benchmarkMap,days)),
-    methodology:'使用最近两年日线，在每个历史时点只使用当时可见的均价、动量、波动、成交量和相对上证综合指数强弱，寻找与当前条件相似的样本。收益已扣除0.2%模拟摩擦成本。'
+    horizons,
+    modelCommittee:{
+      pretrainedAvailable:Boolean(pretrained.available),engine:pretrained.engine||null,model:pretrained.model||null,
+      models:pretrained.models||[],reason:pretrained.reason||null,error:pretrained.error||null,
+      agreementCount:confirmed.length,total:3,
+      status:pretrained.available?(confirmed.length?`${confirmed.length}/3个周期形成双模型共振`:'各模型尚未形成共振'):'预训练服务不可用，已安全回退到历史统计模型',
+      lightgbm:modelStatus().active?'已验证并参与机会排序':'未训练，不参与本次预测'
+    },
+    methodology:'模型委员会分别展示Amazon Chronos-Bolt预训练价格分布与最近两年历史条件统计；只有方向一致才标记共振。历史统计收益扣除0.2%模拟摩擦成本。DeepSeek负责解释事件证据，不直接修改数值预测。'
   };
 }
 
@@ -677,7 +695,7 @@ async function predictionScorecard(userId){
   return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.14.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus() }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.15.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
 app.get('/api/model/status', auth, (_req,res) => res.json(modelStatus()));
 app.get('/api/session',async(req,res)=>{
   try{
@@ -782,8 +800,8 @@ app.get('/api/admin/backup',auth,admin,async(_req,res)=>{
       pool.query('SELECT id,user_id,alert_key,symbol,title,content,level,read_at,created_at FROM user_alerts ORDER BY id'),
       pool.query('SELECT id,user_id,symbol,name,score,status,price,data_date,created_at FROM signal_snapshots ORDER BY id')
     ]);
-    backup={version:'1.13.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
-  }else backup={version:'1.13.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
+    backup={version:'1.15.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
+  }else backup={version:'1.15.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
   res.setHeader('Content-Disposition',`attachment; filename="allen-stock-backup-${createdAt.slice(0,10)}.json"`);res.json(backup);
 });
 
