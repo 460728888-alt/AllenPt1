@@ -1,12 +1,12 @@
 {
   "name": "allen-stock-web",
-  "version": "1.18.0",
+  "version": "1.20.0",
   "private": true,
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check app.js && node --check ranking-model.js && node --check forecast-client.js && node --test forecast-client.test.js ranking-model.test.js opportunity.test.js radar-v2.test.js radar-ui.test.js"
+    "check": "node --check server.js && node --check app.js && node --check ranking-model.js && node --check forecast-client.js && node --check radar-lifecycle.js && node --test forecast-client.test.js ranking-model.test.js opportunity.test.js radar-lifecycle.test.js radar-v2.test.js radar-ui.test.js"
   },
   "dependencies": {
     "express": "^5.1.0",

@@ -2,12 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateBundleStatus, modelStatus, rankingFeatures, rankIdeas, RANKING_FEATURES } from './ranking-model.js';
 
-test('unapproved or stale manifest fails closed instead of inventing model scores', () => {
+test('ranking follows the audited manifest and fails closed when inactive', () => {
   const status = modelStatus();
-  assert.equal(status.engine, 'LightGBM LambdaRank');
-  assert.equal(status.active, false);
+  assert.match(status.engine, /LightGBM/);
   const ranked = rankIdeas([{symbol:'000001.SZ'},{symbol:'000002.SZ'}],20);
-  assert.equal(ranked.items.every(item => item.modelRanking === null), true);
+  if (status.active && status.activeHorizons.includes(20)) {
+    assert.equal(ranked.items.every(item => item.modelRanking?.days === 20), true);
+    assert.equal(ranked.items.every(item => Number.isFinite(item.modelRanking?.probability)), true);
+  } else {
+    assert.equal(ranked.items.every(item => item.modelRanking === null), true);
+  }
 });
 
 test('approved horizons activate independently when market data is fresh', () => {

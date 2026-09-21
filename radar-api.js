@@ -1,18 +1,30 @@
 import crypto from 'node:crypto';
 import {buildRadar,validateCriteria} from './radar-engine.js';
 import {mapLimit} from './opportunity.js';
+import {mergeOpportunityLifecycle} from './radar-lifecycle.js';
 
 export async function initRadarTables(pool){if(!pool)return;await pool.query(`CREATE TABLE IF NOT EXISTS radar_journal (
  id TEXT PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  report_id TEXT NOT NULL,symbol TEXT NOT NULL,data_json JSONB NOT NULL,
- created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,report_id,symbol))`);}
+ created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,report_id,symbol))`);
+ await pool.query(`CREATE TABLE IF NOT EXISTS radar_lifecycle (
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,symbol TEXT NOT NULL,data_json JSONB NOT NULL,
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),PRIMARY KEY(user_id,symbol))`);
+}
 export function registerRadar({app,auth,pool,market,research,quote,publicJson,ai,ranker}){
- const jobs=new Map(),reports=[],journal=new Map(),bodyCache=new Map(),feedCache=new Map();
+ const jobs=new Map(),reports=[],journal=new Map(),lifecycle=new Map(),bodyCache=new Map(),feedCache=new Map();
  const active=id=>[...jobs.values()].find(j=>j.userId===id&&j.status==='running');
  const save=async(userId,r)=>{if(pool)await pool.query('INSERT INTO opportunity_reports(id,user_id,result_json) VALUES($1,$2,$3)',[r.id,userId,JSON.stringify(r)]);else{reports.push({userId,result:r});if(reports.length>200)reports.shift();}};
  const readReports=async userId=>pool?(await pool.query('SELECT result_json FROM opportunity_reports WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10',[userId])).rows.map(r=>r.result_json):reports.filter(r=>r.userId===userId).slice(-10).reverse().map(r=>r.result);
  const getReport=async(userId,id)=>pool?(await pool.query('SELECT result_json FROM opportunity_reports WHERE user_id=$1 AND id=$2',[userId,id])).rows[0]?.result_json:reports.find(r=>r.userId===userId&&r.result.id===id)?.result;
  const readJournal=async userId=>pool?(await pool.query('SELECT id,data_json FROM radar_journal WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100',[userId])).rows.map(r=>({id:r.id,...r.data_json})):[...journal.values()].filter(r=>r.userId===userId).map(r=>({id:r.id,...r.data})).reverse();
+ const readLifecycle=async userId=>pool?(await pool.query('SELECT data_json FROM radar_lifecycle WHERE user_id=$1 ORDER BY updated_at, symbol',[userId])).rows.map(r=>r.data_json):[...lifecycle.values()].filter(r=>r.userId===userId).map(r=>r.data);
+ const writeLifecycle=async(userId,entries)=>{
+   if(pool){
+     for(const entry of entries)await pool.query(`INSERT INTO radar_lifecycle(user_id,symbol,data_json,updated_at) VALUES($1,$2,$3,NOW())
+       ON CONFLICT(user_id,symbol) DO UPDATE SET data_json=EXCLUDED.data_json,updated_at=NOW()`,[userId,entry.symbol,JSON.stringify(entry)]);
+   }else for(const entry of entries)lifecycle.set(`${userId}:${entry.symbol}`,{userId,data:entry});
+ };
  async function feed(limit){
    const cached=feedCache.get(limit);if(cached&&Date.now()-cached.time<600000)return cached.value;
    const seen=new Map();const pages=await mapLimit(Array.from({length:limit/100},(_,i)=>i+1),3,async page=>{
@@ -50,7 +62,18 @@ export function registerRadar({app,auth,pool,market,research,quote,publicJson,ai
    res.status(202).json({jobId:id});
    void (async()=>{try{
      const result=await buildRadar(criteria,{market,research,quote,feed,content,ranker,ai:ai?result=>ai(req.user.username,result):null},(stage,completed,total)=>Object.assign(job,{stage,completed,total}));
-     Object.assign(result,{id,createdAt:new Date().toISOString(),durable:!!pool});await save(req.user.id,result);Object.assign(job,{status:'done',result,stage:'已保存'});
+     Object.assign(result,{id,createdAt:new Date().toISOString(),durable:!!pool});
+     result.scanCandidates=result.candidates;
+     let previous=await readLifecycle(req.user.id);
+     // 首次升级时把最近一份旧报告迁入稳定候选池，避免部署新版当天清空原有观察对象。
+     if(!previous.length){
+       const prior=(await readReports(req.user.id))[0];
+       if(prior?.candidates?.length)previous=mergeOpportunityLifecycle([],prior,new Date(prior.createdAt||result.createdAt)).entries;
+     }
+     const merged=mergeOpportunityLifecycle(previous,result,new Date(result.createdAt));
+     Object.assign(result,{candidates:merged.candidates,newCandidates:merged.newCandidates,continuingCandidates:merged.continuingCandidates,
+       lifecycle:{active:merged.candidates.length,new:merged.newCandidates.length,continuing:merged.continuingCandidates.length,expired:merged.expired}});
+     await writeLifecycle(req.user.id,merged.entries);await save(req.user.id,result);Object.assign(job,{status:'done',result,stage:'已保存'});
    }catch(error){Object.assign(job,{status:'failed',error:error.message,stage:'扫描未完成'})}})();
  });
  app.get('/api/radar/journal',auth,safe(async(req,res)=>res.json({items:await readJournal(req.user.id),durable:!!pool})));
