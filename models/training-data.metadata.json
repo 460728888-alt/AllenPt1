@@ -1,18 +1,142 @@
 {
-  "createdAt": "2026-09-20T23:47:23.853565+00:00",
-  "source": "Microsoft Qlib public China daily bundle",
-  "sourceUrl": "https://github.com/microsoft/qlib",
-  "universe": "Qlib point-in-time CSI 300 plus CSI 500 membership",
-  "rows": 458586,
-  "symbols": 1006,
-  "dates": 601,
-  "dateFrom": "2018-01-02",
-  "dateThrough": "2020-07-03",
-  "labelBenchmark": "same-date CSI 800 median future return",
+  "createdAt": "2026-09-21T00:26:04.695016+00:00",
+  "source": "Yahoo Finance daily chart history",
+  "sourceUrl": "https://finance.yahoo.com/",
+  "universe": "Union of CSI 300 and CSI 500 symbols recorded in Microsoft Qlib instrument files",
+  "rows": 3956286,
+  "symbols": 1594,
+  "requestedSymbols": 1730,
+  "failedSymbols": 136,
+  "dates": 2542,
+  "dateFrom": "2016-04-05",
+  "dateThrough": "2026-09-18",
+  "labelBenchmark": "same-date downloaded-universe median future return",
   "limitations": [
-    "Qlib public bundle is research data, not real-time broker data",
-    "bundle freshness is recorded by dateThrough and may lag the market",
-    "financial and announcement features remain neutral in this bootstrap model"
+    "Yahoo chart data is a free research fallback, not exchange-licensed production data",
+    "the Qlib instrument union is not exact point-in-time membership after the Qlib bundle end date",
+    "delisted or unavailable symbols may be missing and create survivorship bias",
+    "financial and announcement features remain neutral in this price-only model"
   ],
-  "marketFailures": []
+  "failureExamples": [
+    {
+      "symbol": "000005",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000022",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000033",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000040",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000046",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000043",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000413",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000416",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000418",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000511",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000515",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000522",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000540",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000584",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000587",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000585",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000594",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000602",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000616",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000627",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000662",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000667",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000666",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000671",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000687",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000693",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000748",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000732",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000780",
+      "reason": "HTTP Error 404: Not Found"
+    },
+    {
+      "symbol": "000806",
+      "reason": "HTTP Error 404: Not Found"
+    }
+  ]
 }

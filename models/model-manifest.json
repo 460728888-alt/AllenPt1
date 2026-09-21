@@ -1,11 +1,11 @@
 {
-  "schema": 1,
+  "schema": 2,
   "engine": "LightGBM LambdaRank",
-  "version": "2026.09.20-2347",
-  "trainedAt": "2026-09-20T23:47:25.936080+00:00",
-  "dataThrough": "2020-07-03",
-  "universeSize": 1006,
-  "trainingRows": 314628,
+  "version": "2026.09.21-0026",
+  "trainedAt": "2026-09-21T00:26:09.125824+00:00",
+  "dataThrough": "2026-09-18",
+  "universeSize": 1594,
+  "trainingRows": 3956286,
   "features": [
     "return5",
     "return20",
@@ -28,260 +28,394 @@
   "horizons": {
     "5": {
       "file": "lambdarank-5d.json",
-      "bestIteration": 2,
+      "bestIteration": 23,
+      "labelThrough": "2026-09-11",
       "calibration": [
         {
-          "min": -0.04343210220772275,
-          "max": -0.014974095004462255,
-          "mid": -0.018422193587245585,
+          "min": -0.18356662409172583,
+          "max": -0.16131012667311226,
+          "mid": -0.1699793277710209,
+          "outperformRate": 47.0,
+          "samples": 60732
+        },
+        {
+          "min": -0.16131012667311226,
+          "max": -0.14652012162325578,
+          "mid": -0.1542757442706265,
+          "outperformRate": 47.7,
+          "samples": 60731
+        },
+        {
+          "min": -0.14652012162325578,
+          "max": -0.13404139133059206,
+          "mid": -0.14080919201218703,
+          "outperformRate": 46.0,
+          "samples": 60731
+        },
+        {
+          "min": -0.13404139133059206,
+          "max": -0.11525475083487083,
+          "mid": -0.12656114353472445,
+          "outperformRate": 46.3,
+          "samples": 60732
+        },
+        {
+          "min": -0.11525475083487083,
+          "max": -0.10229968502039458,
+          "mid": -0.10754161894064992,
+          "outperformRate": 43.7,
+          "samples": 60731
+        },
+        {
+          "min": -0.10229968502039458,
+          "max": -0.0864382096066938,
+          "mid": -0.09476365790587912,
           "outperformRate": 45.0,
-          "samples": 7225
+          "samples": 60731
         },
         {
-          "min": -0.014974095004462255,
-          "max": -0.010915799671467663,
-          "mid": -0.010915799671467663,
-          "outperformRate": 51.9,
-          "samples": 7225
+          "min": -0.0864382096066938,
+          "max": -0.07470862450809981,
+          "mid": -0.07892169861526974,
+          "outperformRate": 45.3,
+          "samples": 60732
         },
         {
-          "min": -0.010915799671467663,
-          "max": -0.009886623075300728,
-          "mid": -0.010915799671467663,
-          "outperformRate": 46.6,
-          "samples": 7224
+          "min": -0.07470862450809981,
+          "max": -0.06159310444302728,
+          "mid": -0.06916871909754227,
+          "outperformRate": 45.8,
+          "samples": 60731
         },
         {
-          "min": -0.009886623075300728,
-          "max": -0.005714629616174331,
-          "mid": -0.007767784013762747,
-          "outperformRate": 52.5,
-          "samples": 7225
+          "min": -0.06159185666762077,
+          "max": -0.018126932572574136,
+          "mid": -0.044663920351836084,
+          "outperformRate": 46.2,
+          "samples": 60731
         },
         {
-          "min": -0.005714629616174331,
-          "max": -0.002675158666513578,
-          "mid": -0.005714629616174331,
-          "outperformRate": 48.0,
-          "samples": 7224
-        },
-        {
-          "min": -0.002675158666513578,
-          "max": -0.002269348110133017,
-          "mid": -0.002269348110133017,
-          "outperformRate": 54.0,
-          "samples": 7225
-        },
-        {
-          "min": -0.002269348110133017,
-          "max": -0.002269348110133017,
-          "mid": -0.002269348110133017,
-          "outperformRate": 52.8,
-          "samples": 7224
-        },
-        {
-          "min": -0.002269348110133017,
-          "max": 0.002798430477593139,
-          "mid": -9.024661120295542e-05,
-          "outperformRate": 48.7,
-          "samples": 7225
-        },
-        {
-          "min": 0.002798430477593139,
-          "max": 0.010641535613710439,
-          "mid": 0.005819739470532276,
-          "outperformRate": 49.7,
-          "samples": 7224
-        },
-        {
-          "min": 0.010641535613710439,
-          "max": 0.05193772205845162,
-          "mid": 0.012872249356112739,
-          "outperformRate": 50.7,
-          "samples": 7225
+          "min": -0.018126932572574136,
+          "max": 0.4657372674610548,
+          "mid": 0.027550430696639792,
+          "outperformRate": 48.3,
+          "samples": 60732
         }
       ],
       "metrics": {
-        "testRows": 72246,
-        "ndcgAt20": 0.3767,
-        "topDecileMeanExcess": 0.5626,
-        "topDecileHitRate": 49.9,
+        "testRows": 1209846,
+        "testDates": 759,
+        "ndcgAt20": 0.4179,
+        "topDecileGrossMeanExcess": 0.8733,
+        "topDecileNetMeanExcess": 0.5733,
+        "topDecileNetHitRate": 47.8,
+        "topDecileMeanExcess": 0.5733,
+        "topDecileHitRate": 47.8,
+        "positiveFolds": 3,
         "approved": false
-      }
+      },
+      "walkForward": [
+        {
+          "testRows": 403282,
+          "testDates": 253,
+          "ndcgAt20": 0.3841,
+          "topDecileGrossMeanExcess": 0.4831,
+          "topDecileNetMeanExcess": 0.1831,
+          "topDecileNetHitRate": 47.7,
+          "fold": 1,
+          "trainThrough": "2022-07-13",
+          "validationThrough": "2023-07-27",
+          "testThrough": "2024-08-12"
+        },
+        {
+          "testRows": 403282,
+          "testDates": 253,
+          "ndcgAt20": 0.4298,
+          "topDecileGrossMeanExcess": 1.0872,
+          "topDecileNetMeanExcess": 0.7872,
+          "topDecileNetHitRate": 48.0,
+          "fold": 2,
+          "trainThrough": "2023-07-27",
+          "validationThrough": "2024-08-12",
+          "testThrough": "2025-08-27"
+        },
+        {
+          "testRows": 403282,
+          "testDates": 253,
+          "ndcgAt20": 0.4398,
+          "topDecileGrossMeanExcess": 1.0497,
+          "topDecileNetMeanExcess": 0.7497,
+          "topDecileNetHitRate": 47.6,
+          "fold": 3,
+          "trainThrough": "2024-08-12",
+          "validationThrough": "2025-08-27",
+          "testThrough": "2026-09-11"
+        }
+      ]
     },
     "20": {
       "file": "lambdarank-20d.json",
-      "bestIteration": 4,
+      "bestIteration": 2,
+      "labelThrough": "2026-08-21",
       "calibration": [
         {
-          "min": -0.062088496995717904,
-          "max": -0.03683116837438351,
-          "mid": -0.04419995310196936,
-          "outperformRate": 42.7,
-          "samples": 7218
+          "min": -0.041514983230139635,
+          "max": -0.011350046755367906,
+          "mid": -0.011350046755367906,
+          "outperformRate": 46.8,
+          "samples": 60413
         },
         {
-          "min": -0.03683116837438351,
-          "max": -0.030136156449439302,
-          "mid": -0.036471736246826425,
-          "outperformRate": 44.8,
-          "samples": 7218
+          "min": -0.011350046755367906,
+          "max": -0.009938905208946917,
+          "mid": -0.01030681940277827,
+          "outperformRate": 49.2,
+          "samples": 60413
         },
         {
-          "min": -0.030136156449439302,
-          "max": -0.027304788311799187,
-          "mid": -0.028499905956754144,
-          "outperformRate": 46.5,
-          "samples": 7218
+          "min": -0.009938905208946917,
+          "max": -0.006637277528285872,
+          "mid": -0.008326282730223684,
+          "outperformRate": 42.1,
+          "samples": 60412
         },
         {
-          "min": -0.027304788311799187,
-          "max": -0.02102029764661121,
-          "mid": -0.024265538789079052,
-          "outperformRate": 48.3,
-          "samples": 7217
+          "min": -0.006637277528285872,
+          "max": -0.006249733016221401,
+          "mid": -0.006249733016221401,
+          "outperformRate": 49.9,
+          "samples": 60413
         },
         {
-          "min": -0.02102029764661121,
-          "max": -0.018513756902938244,
-          "mid": -0.02000761212677868,
-          "outperformRate": 49.5,
-          "samples": 7218
+          "min": -0.006249733016221401,
+          "max": -0.005405478794855296,
+          "mid": -0.006249733016221401,
+          "outperformRate": 47.9,
+          "samples": 60412
         },
         {
-          "min": -0.018513756902938244,
-          "max": -0.014038465168772003,
-          "mid": -0.01655677880282483,
-          "outperformRate": 53.4,
-          "samples": 7218
+          "min": -0.005405478794855296,
+          "max": -0.0034117010458637486,
+          "mid": -0.005182080651816228,
+          "outperformRate": 47.4,
+          "samples": 60413
         },
         {
-          "min": -0.014038465168772003,
-          "max": -0.009499683728196408,
-          "mid": -0.01258855287601975,
-          "outperformRate": 52.1,
-          "samples": 7217
+          "min": -0.0034117010458637486,
+          "max": -0.0011374745681523289,
+          "mid": -0.0034117010458637486,
+          "outperformRate": 46.0,
+          "samples": 60412
         },
         {
-          "min": -0.009499683728196408,
-          "max": -0.003385666768826411,
-          "mid": -0.005761803720680981,
-          "outperformRate": 53.4,
-          "samples": 7218
+          "min": -0.0011374745681523289,
+          "max": 0.004594962638419444,
+          "mid": 0.00017284190913637336,
+          "outperformRate": 50.1,
+          "samples": 60413
         },
         {
-          "min": -0.003385666768826411,
-          "max": 0.004836803082862106,
-          "mid": -0.0005403563260081993,
-          "outperformRate": 52.0,
-          "samples": 7218
+          "min": 0.004594962638419444,
+          "max": 0.005050222389432294,
+          "mid": 0.005050222389432294,
+          "outperformRate": 49.8,
+          "samples": 60412
         },
         {
-          "min": 0.004836803082862106,
-          "max": 0.0879403292772005,
-          "mid": 0.01671150705947378,
-          "outperformRate": 57.5,
-          "samples": 7218
+          "min": 0.005050222389432294,
+          "max": 0.04611151145851759,
+          "mid": 0.01249420148482449,
+          "outperformRate": 52.8,
+          "samples": 60413
         }
       ],
       "metrics": {
-        "testRows": 72178,
-        "ndcgAt20": 0.4125,
-        "topDecileMeanExcess": 2.7738,
-        "topDecileHitRate": 57.0,
-        "approved": true
-      }
+        "testRows": 1205064,
+        "testDates": 756,
+        "ndcgAt20": 0.4031,
+        "topDecileGrossMeanExcess": 2.3521,
+        "topDecileNetMeanExcess": 2.0521,
+        "topDecileNetHitRate": 51.5,
+        "topDecileMeanExcess": 2.0521,
+        "topDecileHitRate": 51.5,
+        "positiveFolds": 3,
+        "approved": false
+      },
+      "walkForward": [
+        {
+          "testRows": 401688,
+          "testDates": 252,
+          "ndcgAt20": 0.4157,
+          "topDecileGrossMeanExcess": 2.0881,
+          "topDecileNetMeanExcess": 1.7881,
+          "topDecileNetHitRate": 53.2,
+          "fold": 1,
+          "trainThrough": "2022-06-28",
+          "validationThrough": "2023-07-11",
+          "testThrough": "2024-07-24"
+        },
+        {
+          "testRows": 401688,
+          "testDates": 252,
+          "ndcgAt20": 0.4123,
+          "topDecileGrossMeanExcess": 2.2321,
+          "topDecileNetMeanExcess": 1.9321,
+          "topDecileNetHitRate": 49.3,
+          "fold": 2,
+          "trainThrough": "2023-07-11",
+          "validationThrough": "2024-07-24",
+          "testThrough": "2025-08-07"
+        },
+        {
+          "testRows": 401688,
+          "testDates": 252,
+          "ndcgAt20": 0.3812,
+          "topDecileGrossMeanExcess": 2.7362,
+          "topDecileNetMeanExcess": 2.4362,
+          "topDecileNetHitRate": 51.9,
+          "fold": 3,
+          "trainThrough": "2024-07-24",
+          "validationThrough": "2025-08-07",
+          "testThrough": "2026-08-21"
+        }
+      ]
     },
     "60": {
       "file": "lambdarank-60d.json",
-      "bestIteration": 1,
+      "bestIteration": 2,
+      "labelThrough": "2026-06-26",
       "calibration": [
         {
-          "min": -0.02027078500993873,
-          "max": -0.008917115599984187,
-          "mid": -0.018616790980661463,
-          "outperformRate": 41.3,
-          "samples": 7234
+          "min": -0.04605024449561459,
+          "max": -0.012118563846792926,
+          "mid": -0.016137872414775108,
+          "outperformRate": 40.0,
+          "samples": 59457
         },
         {
-          "min": -0.008917115599984187,
-          "max": -0.005946193737768755,
-          "mid": -0.008509038371912945,
-          "outperformRate": 49.9,
-          "samples": 7233
+          "min": -0.012118563846792926,
+          "max": -0.009602185655923082,
+          "mid": -0.010794821836635967,
+          "outperformRate": 47.4,
+          "samples": 59456
         },
         {
-          "min": -0.005946193737768755,
-          "max": -0.0035135813486752068,
-          "mid": -0.005642481840350533,
+          "min": -0.009602185655923082,
+          "max": -0.006168800526907594,
+          "mid": -0.008004159577139132,
+          "outperformRate": 45.8,
+          "samples": 59456
+        },
+        {
+          "min": -0.006168800526907594,
+          "max": -0.006168800526907594,
+          "mid": -0.006168800526907594,
+          "outperformRate": 49.8,
+          "samples": 59456
+        },
+        {
+          "min": -0.006168800526907594,
+          "max": -0.00584086460137852,
+          "mid": -0.005895461045465941,
+          "outperformRate": 47.9,
+          "samples": 59456
+        },
+        {
+          "min": -0.00584086460137852,
+          "max": -0.002712567898053685,
+          "mid": -0.005492998484954697,
           "outperformRate": 52.7,
-          "samples": 7233
+          "samples": 59456
         },
         {
-          "min": -0.0035135813486752068,
-          "max": -0.0035135813486752068,
-          "mid": -0.0035135813486752068,
-          "outperformRate": 46.3,
-          "samples": 7233
+          "min": -0.002712567898053685,
+          "max": -0.0016995095364891015,
+          "mid": -0.002606076068476649,
+          "outperformRate": 52.8,
+          "samples": 59456
         },
         {
-          "min": -0.0035135813486752068,
-          "max": -0.0021765324803889106,
-          "mid": -0.0024499930327068907,
-          "outperformRate": 53.0,
-          "samples": 7234
+          "min": -0.0016995095364891015,
+          "max": 0.003246480063927893,
+          "mid": 0.0008501565603772599,
+          "outperformRate": 51.2,
+          "samples": 59456
         },
         {
-          "min": -0.0021765324803889106,
-          "max": 0.00022909713583477146,
-          "mid": 0.00022909713583477146,
-          "outperformRate": 52.1,
-          "samples": 7233
+          "min": 0.003246480063927893,
+          "max": 0.01036387967761173,
+          "mid": 0.005970324417780481,
+          "outperformRate": 50.0,
+          "samples": 59456
         },
         {
-          "min": 0.00022909713583477146,
-          "max": 0.0011472825669391776,
-          "mid": 0.0011472825669391776,
-          "outperformRate": 43.8,
-          "samples": 7233
-        },
-        {
-          "min": 0.0011472825669391776,
-          "max": 0.0026590573271695404,
-          "mid": 0.0024099422630469085,
-          "outperformRate": 55.9,
-          "samples": 7233
-        },
-        {
-          "min": 0.0026590573271695404,
-          "max": 0.008557498186351958,
-          "mid": 0.00586582008908675,
-          "outperformRate": 54.8,
-          "samples": 7233
-        },
-        {
-          "min": 0.008557498186351958,
-          "max": 0.025085103455114055,
-          "mid": 0.010595342292221567,
-          "outperformRate": 50.1,
-          "samples": 7234
+          "min": 0.01036387967761173,
+          "max": 0.03707486766106233,
+          "mid": 0.013232902554689034,
+          "outperformRate": 51.9,
+          "samples": 59457
         }
       ],
       "metrics": {
-        "testRows": 72333,
-        "ndcgAt20": 0.3712,
-        "topDecileMeanExcess": 4.7419,
-        "topDecileHitRate": 51.5,
+        "testRows": 1185936,
+        "testDates": 744,
+        "ndcgAt20": 0.3871,
+        "topDecileGrossMeanExcess": 3.0022,
+        "topDecileNetMeanExcess": 2.7022,
+        "topDecileNetHitRate": 49.4,
+        "topDecileMeanExcess": 2.7022,
+        "topDecileHitRate": 49.4,
+        "positiveFolds": 3,
         "approved": false
-      }
+      },
+      "walkForward": [
+        {
+          "testRows": 395312,
+          "testDates": 248,
+          "ndcgAt20": 0.3722,
+          "topDecileGrossMeanExcess": 1.9961,
+          "topDecileNetMeanExcess": 1.6961,
+          "topDecileNetHitRate": 48.9,
+          "fold": 1,
+          "trainThrough": "2022-05-24",
+          "validationThrough": "2023-05-30",
+          "testThrough": "2024-06-07"
+        },
+        {
+          "testRows": 395312,
+          "testDates": 248,
+          "ndcgAt20": 0.4192,
+          "topDecileGrossMeanExcess": 2.5325,
+          "topDecileNetMeanExcess": 2.2325,
+          "topDecileNetHitRate": 47.2,
+          "fold": 2,
+          "trainThrough": "2023-05-30",
+          "validationThrough": "2024-06-07",
+          "testThrough": "2025-06-18"
+        },
+        {
+          "testRows": 395312,
+          "testDates": 248,
+          "ndcgAt20": 0.3699,
+          "topDecileGrossMeanExcess": 4.4781,
+          "topDecileNetMeanExcess": 4.1781,
+          "topDecileNetHitRate": 52.0,
+          "fold": 3,
+          "trainThrough": "2024-06-07",
+          "validationThrough": "2025-06-18",
+          "testThrough": "2026-06-26"
+        }
+      ]
     }
   },
-  "split": {
-    "trainBefore": "2019-10-08",
-    "validationBefore": "2020-02-20"
-  },
   "validation": {
+    "mode": "expanding walk-forward",
+    "folds": 3,
+    "roundTripCostBps": 30.0,
+    "minimumNetHitRate": 52.0,
     "approved": false,
-    "reason": "全部5/20/60日模型须在时间外测试集达到最低样本、正超额收益及52%前十分位胜率"
+    "allApproved": false,
+    "approvedHorizons": [],
+    "reason": "各周期独立审批；滚动时间外测试扣除交易成本后须有正超额、达到最低胜率且多数折为正"
   }
 }
