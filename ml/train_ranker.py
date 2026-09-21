@@ -16,8 +16,10 @@ import numpy as np
 import pandas as pd
 
 FEATURES = [
-    "return5", "return20", "return60", "maGap5To20", "maGap20To60",
-    "volatility20", "volumeRatio5To20", "distanceToHigh20", "distanceToLow20",
+    "return1", "return5", "return10", "return20", "return60", "maGap5To20", "maGap20To60",
+    "volatility5", "volatility20", "volatilityRatio5To20", "volumeRatio5To20",
+    "volumeRatio5To60", "distanceToHigh20", "distanceToLow20", "distanceToHigh60",
+    "distanceToLow60", "rsi14", "macdGap", "momentumAcceleration",
     "revenueGrowth", "profitGrowth", "netMargin", "debtRatio", "timedEventCount",
     "positiveEvidenceCount", "negativeEvidenceCount", "bodyEvidenceCount",
 ]
@@ -25,11 +27,20 @@ HORIZONS = (5, 20, 60)
 SEED = 20260920
 
 
-def relevance(values: pd.Series) -> pd.Series:
-    """Map same-day future excess returns to 0..4 without crossing dates."""
-    if values.nunique(dropna=True) < 5:
-        return values.rank(method="average", pct=True).mul(5).clip(upper=4.999).astype(int)
-    return pd.qcut(values.rank(method="first"), 5, labels=False).astype(int)
+def relevance(values: pd.Series, cost_pct: float) -> pd.Series:
+    """Prioritize net winners, then rank the magnitude of those winners.
+
+    Labels 1..4 are reserved for stocks whose same-date excess return remains
+    positive after estimated round-trip costs. Losing observations stay at 0.
+    This keeps the learning objective aligned with the deployment approval gate.
+    """
+    net = values - cost_pct
+    result = pd.Series(0, index=values.index, dtype="int64")
+    winners = net > 0
+    if winners.any():
+        winner_rank = net.loc[winners].rank(method="first", pct=True)
+        result.loc[winners] = np.ceil(winner_rank * 4).clip(1, 4).astype(int)
+    return result
 
 
 def ndcg_at_k(labels: np.ndarray, scores: np.ndarray, groups: np.ndarray, k: int = 20) -> float:
@@ -72,9 +83,11 @@ def load_frame(source: Path) -> pd.DataFrame:
     return frame
 
 
-def prepare(frame: pd.DataFrame, label: str) -> pd.DataFrame:
+def prepare(frame: pd.DataFrame, label: str, cost_pct: float) -> pd.DataFrame:
     result = frame.dropna(subset=[label]).copy().sort_values(["date", "symbol"])
-    result["relevance"] = result.groupby("date")[label].transform(relevance)
+    result["relevance"] = result.groupby("date")[label].transform(
+        lambda values: relevance(values, cost_pct)
+    )
     return result
 
 
@@ -164,13 +177,14 @@ def main() -> None:
             "mode": "expanding walk-forward", "folds": args.walk_forward_folds,
             "roundTripCostBps": args.round_trip_cost_bps,
             "minimumNetHitRate": args.min_hit_rate,
+            "trainingObjective": "cost-aware net-winner ranking",
         },
     }
 
     approved_horizons = []
     for horizon in HORIZONS:
         label = f"future_excess_{horizon}"
-        labelled = prepare(frame, label)
+        labelled = prepare(frame, label, cost_pct)
         dates = np.array(sorted(labelled.date.unique()))
         fold_metrics, out_of_sample = [], []
         for fold_index, (train_end, valid_end, test_last) in enumerate(

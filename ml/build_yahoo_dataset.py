@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 HORIZONS = (5, 20, 60)
-USER_AGENT = "Mozilla/5.0 AllenStockResearch/1.17"
+USER_AGENT = "Mozilla/5.0 AllenStockResearch/1.18"
 
 
 def universe(provider: Path) -> list[str]:
@@ -94,15 +94,39 @@ def add_features(frame: pd.DataFrame) -> pd.DataFrame:
     frame = frame.sort_values("date").copy()
     close, volume = frame.close, frame.volume
     ma5, ma20, ma60 = close.rolling(5).mean(), close.rolling(20).mean(), close.rolling(60).mean()
+    daily_return = close.pct_change(fill_method=None)
+    frame["return1"] = (close / close.shift(1) - 1) * 100
     frame["return5"] = (close / close.shift(5) - 1) * 100
+    frame["return10"] = (close / close.shift(10) - 1) * 100
     frame["return20"] = (close / close.shift(20) - 1) * 100
     frame["return60"] = (close / close.shift(60) - 1) * 100
     frame["maGap5To20"] = (ma5 / ma20 - 1) * 100
     frame["maGap20To60"] = (ma20 / ma60 - 1) * 100
-    frame["volatility20"] = close.pct_change(fill_method=None).rolling(20).std(ddof=0) * 100
-    frame["volumeRatio5To20"] = volume.rolling(5).mean() / volume.rolling(20).mean()
+    volatility5 = daily_return.rolling(5).std(ddof=0) * 100
+    volatility20 = daily_return.rolling(20).std(ddof=0) * 100
+    frame["volatility5"] = volatility5
+    frame["volatility20"] = volatility20
+    frame["volatilityRatio5To20"] = (volatility5 / volatility20).where(volatility20 > 0, 1.0)
+    volume5 = volume.rolling(5).mean()
+    volume20 = volume.rolling(20).mean()
+    volume60 = volume.rolling(60).mean()
+    frame["volumeRatio5To20"] = (volume5 / volume20).where(volume20 > 0, 1.0)
+    frame["volumeRatio5To60"] = (volume5 / volume60).where(volume60 > 0, 1.0)
     frame["distanceToHigh20"] = (close / frame.high.rolling(20).max() - 1) * 100
     frame["distanceToLow20"] = (close / frame.low.rolling(20).min() - 1) * 100
+    frame["distanceToHigh60"] = (close / frame.high.rolling(60).max() - 1) * 100
+    frame["distanceToLow60"] = (close / frame.low.rolling(60).min() - 1) * 100
+    delta = close.diff()
+    average_gain = delta.clip(lower=0).rolling(14).mean()
+    average_loss = (-delta.clip(upper=0)).rolling(14).mean()
+    relative_strength = average_gain / average_loss
+    frame["rsi14"] = (100 - 100 / (1 + relative_strength)).where(
+        average_loss > 0, np.where(average_gain > 0, 100.0, 50.0)
+    )
+    frame["macdGap"] = (
+        (close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()) / close
+    ) * 100
+    frame["momentumAcceleration"] = frame["return5"] - frame["return20"] / 4
     for horizon in HORIZONS:
         frame[f"future_return_{horizon}"] = close.shift(-horizon) / close - 1
     return frame
@@ -152,9 +176,11 @@ def main() -> None:
     for column, value in neutral.items():
         data[column] = value
     columns = [
-        "date", "symbol", "return5", "return20", "return60", "maGap5To20",
-        "maGap20To60", "volatility20", "volumeRatio5To20", "distanceToHigh20",
-        "distanceToLow20", *neutral.keys(), "future_excess_5", "future_excess_20",
+        "date", "symbol", "return1", "return5", "return10", "return20", "return60",
+        "maGap5To20", "maGap20To60", "volatility5", "volatility20",
+        "volatilityRatio5To20", "volumeRatio5To20", "volumeRatio5To60",
+        "distanceToHigh20", "distanceToLow20", "distanceToHigh60", "distanceToLow60",
+        "rsi14", "macdGap", "momentumAcceleration", *neutral.keys(), "future_excess_5", "future_excess_20",
         "future_excess_60",
     ]
     data = data[columns].replace([np.inf, -np.inf], np.nan)

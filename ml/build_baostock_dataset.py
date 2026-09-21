@@ -23,7 +23,7 @@ import pandas as pd
 
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 AllenStock/1.16",
+    "User-Agent": "Mozilla/5.0 AllenStock/1.18",
     "Referer": "https://quote.eastmoney.com/",
 }
 HORIZONS = (5, 20, 60)
@@ -136,9 +136,11 @@ def bars(code: str, market: int, count: int) -> pd.DataFrame:
 def add_features(frame: pd.DataFrame, benchmark: pd.Series) -> pd.DataFrame:
     out = frame.copy()
     close = out["close"]
-    volume = out["volume"].replace(0, np.nan)
+    volume = out["volume"]
     daily_return = close.pct_change(fill_method=None) * 100
+    out["return1"] = close.pct_change(1, fill_method=None) * 100
     out["return5"] = close.pct_change(5, fill_method=None) * 100
+    out["return10"] = close.pct_change(10, fill_method=None) * 100
     out["return20"] = close.pct_change(20, fill_method=None) * 100
     out["return60"] = close.pct_change(60, fill_method=None) * 100
     average5 = close.rolling(5).mean()
@@ -146,10 +148,31 @@ def add_features(frame: pd.DataFrame, benchmark: pd.Series) -> pd.DataFrame:
     average60 = close.rolling(60).mean()
     out["maGap5To20"] = (average5 / average20 - 1) * 100
     out["maGap20To60"] = (average20 / average60 - 1) * 100
-    out["volatility20"] = daily_return.rolling(20).std(ddof=0)
-    out["volumeRatio5To20"] = volume.rolling(5).mean() / volume.rolling(20).mean()
-    out["distanceToHigh20"] = (close / close.rolling(20).max() - 1) * 100
-    out["distanceToLow20"] = (close / close.rolling(20).min() - 1) * 100
+    volatility5 = daily_return.rolling(5).std(ddof=0)
+    volatility20 = daily_return.rolling(20).std(ddof=0)
+    out["volatility5"] = volatility5
+    out["volatility20"] = volatility20
+    out["volatilityRatio5To20"] = (volatility5 / volatility20).where(volatility20 > 0, 1.0)
+    volume5 = volume.rolling(5).mean()
+    volume20 = volume.rolling(20).mean()
+    volume60 = volume.rolling(60).mean()
+    out["volumeRatio5To20"] = (volume5 / volume20).where(volume20 > 0, 1.0)
+    out["volumeRatio5To60"] = (volume5 / volume60).where(volume60 > 0, 1.0)
+    out["distanceToHigh20"] = (close / out.high.rolling(20).max() - 1) * 100
+    out["distanceToLow20"] = (close / out.low.rolling(20).min() - 1) * 100
+    out["distanceToHigh60"] = (close / out.high.rolling(60).max() - 1) * 100
+    out["distanceToLow60"] = (close / out.low.rolling(60).min() - 1) * 100
+    delta = close.diff()
+    average_gain = delta.clip(lower=0).rolling(14).mean()
+    average_loss = (-delta.clip(upper=0)).rolling(14).mean()
+    relative_strength = average_gain / average_loss
+    out["rsi14"] = (100 - 100 / (1 + relative_strength)).where(
+        average_loss > 0, np.where(average_gain > 0, 100.0, 50.0)
+    )
+    out["macdGap"] = (
+        (close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()) / close
+    ) * 100
+    out["momentumAcceleration"] = out["return5"] - out["return20"] / 4
     out["revenueGrowth"] = 0.0
     out["profitGrowth"] = 0.0
     out["netMargin"] = 0.0
@@ -213,9 +236,11 @@ def main() -> None:
         raise SystemExit("no usable HTTPS stock histories downloaded")
     dataset = pd.concat(frames, ignore_index=True)
     columns = [
-        "date", "symbol", "return5", "return20", "return60", "maGap5To20",
-        "maGap20To60", "volatility20", "volumeRatio5To20", "distanceToHigh20",
-        "distanceToLow20", "revenueGrowth", "profitGrowth", "netMargin", "debtRatio",
+        "date", "symbol", "return1", "return5", "return10", "return20", "return60",
+        "maGap5To20", "maGap20To60", "volatility5", "volatility20",
+        "volatilityRatio5To20", "volumeRatio5To20", "volumeRatio5To60",
+        "distanceToHigh20", "distanceToLow20", "distanceToHigh60", "distanceToLow60",
+        "rsi14", "macdGap", "momentumAcceleration", "revenueGrowth", "profitGrowth", "netMargin", "debtRatio",
         "timedEventCount", "positiveEvidenceCount", "negativeEvidenceCount",
         "bodyEvidenceCount", "future_excess_5", "future_excess_20", "future_excess_60",
     ]

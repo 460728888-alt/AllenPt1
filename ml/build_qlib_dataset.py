@@ -22,23 +22,35 @@ from qlib.data import D
 
 HORIZONS = (5, 20, 60)
 FIELDS = [
+    "$close/Ref($close,1)-1",
     "$close/Ref($close,5)-1",
+    "$close/Ref($close,10)-1",
     "$close/Ref($close,20)-1",
     "$close/Ref($close,60)-1",
     "Mean($close,5)/Mean($close,20)-1",
     "Mean($close,20)/Mean($close,60)-1",
+    "Std($close/Ref($close,1)-1,5)",
     "Std($close/Ref($close,1)-1,20)",
+    "Std($close/Ref($close,1)-1,5)/(Std($close/Ref($close,1)-1,20)+1e-12)",
     "Mean($volume,5)/Mean($volume,20)",
+    "Mean($volume,5)/(Mean($volume,60)+1e-12)",
     "$close/Max($high,20)-1",
     "$close/Min($low,20)-1",
+    "$close/Max($high,60)-1",
+    "$close/Min($low,60)-1",
+    "Sum(Greater($close-Ref($close,1),0),14)/(Sum(Abs($close-Ref($close,1)),14)+1e-12)*100",
+    "(EMA($close,12)-EMA($close,26))/$close*100",
+    "($close/Ref($close,5)-1)-($close/Ref($close,20)-1)/4",
     "Ref($close,-5)/$close-1",
     "Ref($close,-20)/$close-1",
     "Ref($close,-60)/$close-1",
 ]
 NAMES = [
-    "return5", "return20", "return60", "maGap5To20", "maGap20To60",
-    "volatility20", "volumeRatio5To20", "distanceToHigh20",
-    "distanceToLow20", "future_return_5", "future_return_20",
+    "return1", "return5", "return10", "return20", "return60", "maGap5To20", "maGap20To60",
+    "volatility5", "volatility20", "volatilityRatio5To20", "volumeRatio5To20",
+    "volumeRatio5To60", "distanceToHigh20", "distanceToLow20", "distanceToHigh60",
+    "distanceToLow60", "rsi14", "macdGap", "momentumAcceleration",
+    "future_return_5", "future_return_20",
     "future_return_60",
 ]
 
@@ -90,8 +102,9 @@ def main() -> None:
         data = data[data.symbol.isin(keep)]
 
     percentage_features = [
-        "return5", "return20", "return60", "maGap5To20", "maGap20To60",
-        "volatility20", "distanceToHigh20", "distanceToLow20",
+        "return1", "return5", "return10", "return20", "return60", "maGap5To20", "maGap20To60",
+        "volatility5", "volatility20", "distanceToHigh20", "distanceToLow20",
+        "distanceToHigh60", "distanceToLow60", "momentumAcceleration",
     ]
     data[percentage_features] = data[percentage_features] * 100
     for horizon in HORIZONS:
@@ -112,9 +125,11 @@ def main() -> None:
         data[column] = value
 
     columns = [
-        "date", "symbol", "return5", "return20", "return60", "maGap5To20",
-        "maGap20To60", "volatility20", "volumeRatio5To20", "distanceToHigh20",
-        "distanceToLow20", *neutral.keys(), "future_excess_5",
+        "date", "symbol", "return1", "return5", "return10", "return20", "return60",
+        "maGap5To20", "maGap20To60", "volatility5", "volatility20",
+        "volatilityRatio5To20", "volumeRatio5To20", "volumeRatio5To60",
+        "distanceToHigh20", "distanceToLow20", "distanceToHigh60", "distanceToLow60",
+        "rsi14", "macdGap", "momentumAcceleration", *neutral.keys(), "future_excess_5",
         "future_excess_20", "future_excess_60",
     ]
     data = data[columns].replace([np.inf, -np.inf], np.nan)
