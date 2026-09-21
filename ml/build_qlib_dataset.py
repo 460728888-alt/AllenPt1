@@ -118,7 +118,10 @@ def main() -> None:
         "future_excess_20", "future_excess_60",
     ]
     data = data[columns].replace([np.inf, -np.inf], np.nan)
-    data = data.dropna(subset=["return60", "future_excess_60"])
+    # Keep the newest feature rows even though their future labels are not yet
+    # observable. Each horizon drops only its own missing labels at training
+    # time, while dataThrough still reflects true market-data freshness.
+    data = data.dropna(subset=["return60"])
     minimum = min(80, max(20, data.symbol.nunique() // 3))
     daily_count = data.groupby("date").symbol.transform("nunique")
     data = data[daily_count >= minimum].sort_values(["date", "symbol"])
