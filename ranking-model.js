@@ -91,13 +91,18 @@ function readBundle() {
     const stat = fs.statSync(manifestPath);
     if (cache.bundle && cache.modifiedAt === stat.mtimeMs) return cache;
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    if (![1,2].includes(manifest.schema)) throw new Error('模型清单版本不兼容');
+    if (![1,2,3].includes(manifest.schema)) throw new Error('模型清单版本不兼容');
     const horizons = {};
     for (const days of supportedHorizons) {
       const entry = manifest.horizons?.[String(days)];
       if (!entry?.file) continue;
       const full = path.join(root, 'models', path.basename(entry.file));
-      horizons[days] = { ...entry, model:JSON.parse(fs.readFileSync(full, 'utf8')) };
+      const classifierFile = entry.classifierFile ? path.join(root, 'models', path.basename(entry.classifierFile)) : null;
+      horizons[days] = {
+        ...entry,
+        model:JSON.parse(fs.readFileSync(full, 'utf8')),
+        classifier:classifierFile ? JSON.parse(fs.readFileSync(classifierFile, 'utf8')) : null
+      };
     }
     cache.modifiedAt = stat.mtimeMs;
     cache.bundle = { ...manifest, horizons };
@@ -154,7 +159,7 @@ export function evaluateBundleStatus(bundle, now = new Date()) {
     else message = `已启用通过滚动验证的${activeHorizons.join(' / ')}日模型；其他周期继续使用证据规则`;
   }
   return {
-    engine:'LightGBM LambdaRank', available:availableHorizons.length > 0,
+    engine:bundle?.engine || 'LightGBM LambdaRank', available:availableHorizons.length > 0,
     validated:approvedHorizons.length > 0, active:activeHorizons.length > 0,
     stale:availableHorizons.length > 0 && !fresh.fresh, dataAgeDays:fresh.ageDays,
     maxDataLagDays:fresh.maxLagDays, availableHorizons, approvedHorizons, activeHorizons,
@@ -182,9 +187,34 @@ export function rankIdeas(ideas = [], days = 20) {
   if (!horizonActive || !entry?.model || ideas.length < 2) return { status, items:ideas.map(idea => ({...idea,modelRanking:null})) };
   const scored = ideas.map(idea => {
     const features = rankingFeatures(idea);
-    const raw = rawPrediction(entry.model, features, bundle.features || RANKING_FEATURES);
-    return {...idea, modelRanking:{days,rawScore:raw,probability:calibratedProbability(raw, entry.calibration),features}};
-  }).sort((a,b) => b.modelRanking.rawScore - a.modelRanking.rawScore);
+    const rankerRaw = rawPrediction(entry.model, features, bundle.features || RANKING_FEATURES);
+    const classifierRaw = entry.classifier
+      ? rawPrediction(entry.classifier, features, bundle.features || RANKING_FEATURES)
+      : null;
+    return {...idea, modelRanking:{days,rankerRaw,classifierRaw,features}};
+  });
+  if (entry.classifier) {
+    const percentileMap = key => {
+      const ordered = [...scored].sort((a,b) => a.modelRanking[key] - b.modelRanking[key]);
+      const denominator = Math.max(1, ordered.length - 1);
+      return new Map(ordered.map((item,index) => [item, index / denominator]));
+    };
+    const rankPct = percentileMap('rankerRaw');
+    const winPct = percentileMap('classifierRaw');
+    const weight = Math.max(0, Math.min(1, numberOr(entry.rankWeight, .5)));
+    scored.forEach(item => {
+      const raw = weight * rankPct.get(item) + (1 - weight) * winPct.get(item);
+      item.modelRanking.rawScore = raw;
+      item.modelRanking.probability = calibratedProbability(raw, entry.calibration);
+      item.modelRanking.ensemble = {rankWeight:weight,coverage:numberOr(entry.coverage, .1)};
+    });
+  } else {
+    scored.forEach(item => {
+      item.modelRanking.rawScore = item.modelRanking.rankerRaw;
+      item.modelRanking.probability = calibratedProbability(item.modelRanking.rankerRaw, entry.calibration);
+    });
+  }
+  scored.sort((a,b) => b.modelRanking.rawScore - a.modelRanking.rawScore);
   const denominator = Math.max(1, scored.length - 1);
   return {status,items:scored.map((item,index) => ({...item,modelRanking:{...item.modelRanking,rank:index+1,percentile:Number(((1-index/denominator)*100).toFixed(1)),candidateCount:scored.length}}))};
 }
