@@ -1,5 +1,5 @@
 {
-  "createdAt": "2026-09-21T00:26:04.695016+00:00",
+  "createdAt": "2026-09-21T01:42:14.186320+00:00",
   "source": "Yahoo Finance daily chart history",
   "sourceUrl": "https://finance.yahoo.com/",
   "universe": "Union of CSI 300 and CSI 500 symbols recorded in Microsoft Qlib instrument files",
@@ -35,11 +35,11 @@
       "reason": "HTTP Error 404: Not Found"
     },
     {
-      "symbol": "000046",
+      "symbol": "000043",
       "reason": "HTTP Error 404: Not Found"
     },
     {
-      "symbol": "000043",
+      "symbol": "000046",
       "reason": "HTTP Error 404: Not Found"
     },
     {
@@ -75,11 +75,11 @@
       "reason": "HTTP Error 404: Not Found"
     },
     {
-      "symbol": "000587",
+      "symbol": "000585",
       "reason": "HTTP Error 404: Not Found"
     },
     {
-      "symbol": "000585",
+      "symbol": "000587",
       "reason": "HTTP Error 404: Not Found"
     },
     {
@@ -103,11 +103,11 @@
       "reason": "HTTP Error 404: Not Found"
     },
     {
-      "symbol": "000667",
+      "symbol": "000666",
       "reason": "HTTP Error 404: Not Found"
     },
     {
-      "symbol": "000666",
+      "symbol": "000667",
       "reason": "HTTP Error 404: Not Found"
     },
     {
@@ -123,11 +123,11 @@
       "reason": "HTTP Error 404: Not Found"
     },
     {
-      "symbol": "000748",
+      "symbol": "000732",
       "reason": "HTTP Error 404: Not Found"
     },
     {
-      "symbol": "000732",
+      "symbol": "000748",
       "reason": "HTTP Error 404: Not Found"
     },
     {
