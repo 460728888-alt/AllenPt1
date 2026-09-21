@@ -35,4 +35,7 @@ test('ranking feature extraction is finite and uses evidence direction', () => {
   assert.equal(Object.values(features).every(Number.isFinite), true);
   assert.equal(features.timedEventCount, 1);
   assert.equal(features.negativeEvidenceCount, 1);
+  assert.notEqual(features.volumeRatio5To20, 1);
+  assert.equal(features.return1 > 0, true);
+  assert.equal(features.rsi14 >= 0 && features.rsi14 <= 100, true);
 });

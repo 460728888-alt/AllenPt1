@@ -337,15 +337,28 @@ async function getStockData(rawSymbol, options = {}) {
   const result = chart.chart?.result?.[0];
   if (!result) throw new Error('symbol not found');
   const meta = result.meta || {};
-  const closes = (result.indicators?.quote?.[0]?.close || []).filter(Number.isFinite);
-  const volumes = (result.indicators?.quote?.[0]?.volume || []).filter(Number.isFinite);
   const timestamps = result.timestamp || [];
+  const quote = result.indicators?.quote?.[0] || {};
+  const chartRows = timestamps.map((time, index) => ({
+    time,
+    close:Number(quote.close?.[index]),
+    high:Number(quote.high?.[index]),
+    low:Number(quote.low?.[index]),
+    volume:Number(quote.volume?.[index])
+  })).filter(row => Number.isFinite(row.close) && row.close > 0).map(row => ({
+    ...row,
+    high:Number.isFinite(row.high) && row.high > 0 ? row.high : row.close,
+    low:Number.isFinite(row.low) && row.low > 0 ? row.low : row.close,
+    volume:Number.isFinite(row.volume) && row.volume >= 0 ? row.volume : 0
+  }));
+  const closes = chartRows.map(row => row.close);
+  const volumes = chartRows.map(row => row.volume);
   const price = meta.regularMarketPrice ?? closes.at(-1);
   const previous = closes.at(-2) ?? meta.previousClose ?? meta.chartPreviousClose;
   const changePct = previous ? ((price - previous) / previous) * 100 : null;
   const ma5 = average(closes, 5), ma20 = average(closes, 20), ma60 = average(closes, 60);
-  const high20 = Math.max(...closes.slice(-20));
-  const low20 = Math.min(...closes.slice(-20));
+  const high20 = Math.max(...chartRows.slice(-20).map(row => row.high));
+  const low20 = Math.min(...chartRows.slice(-20).map(row => row.low));
   const recent = closes.slice(-21);
   const returns20 = recent.slice(1).map((value, index) => ((value / recent[index]) - 1) * 100);
   const volatility20 = standardDeviation(returns20);
@@ -356,7 +369,9 @@ async function getStockData(rawSymbol, options = {}) {
     currency: meta.currency || '', exchange: meta.exchangeName || '', price, previous, changePct,
     marketTime: meta.regularMarketTime || null,
     technical: { ma5, ma20, ma60, high20, low20, volume: volumes.at(-1) || null, volatility20, score },
-    history: closes.slice(-90).map((close, i) => ({ close, time: timestamps.slice(-closes.slice(-90).length)[i] || null })),
+    // Preserve aligned OHLCV rows. The ranking model must receive the same
+    // price/volume fields that were used to build its training features.
+    history: chartRows.slice(-120),
     news: (search.news || []).map(x => ({ title: x.title, publisher: x.publisher, link: x.link, published: x.providerPublishTime }))
   };
   stock.tradePlan=buildTradePlan(stock);
@@ -695,7 +710,7 @@ async function predictionScorecard(userId){
   return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.17.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.18.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
 app.get('/api/model/status', auth, (_req,res) => res.json(modelStatus()));
 app.get('/api/session',async(req,res)=>{
   try{

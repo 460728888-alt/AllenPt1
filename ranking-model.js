@@ -8,8 +8,10 @@ const supportedHorizons = [5, 20, 60];
 const cache = { loadedAt:0, modifiedAt:0, bundle:null, error:null };
 
 export const RANKING_FEATURES = [
-  'return5','return20','return60','maGap5To20','maGap20To60','volatility20',
-  'volumeRatio5To20','distanceToHigh20','distanceToLow20','revenueGrowth',
+  'return1','return5','return10','return20','return60','maGap5To20','maGap20To60',
+  'volatility5','volatility20','volatilityRatio5To20','volumeRatio5To20',
+  'volumeRatio5To60','distanceToHigh20','distanceToLow20','distanceToHigh60',
+  'distanceToLow60','rsi14','macdGap','momentumAcceleration','revenueGrowth',
   'profitGrowth','netMargin','debtRatio','timedEventCount','positiveEvidenceCount',
   'negativeEvidenceCount','bodyEvidenceCount'
 ];
@@ -22,30 +24,56 @@ const deviation = values => {
   const mean = average(values);
   return Math.sqrt(average(values.map(value => (value - mean) ** 2)));
 };
+const ema = (values, days) => {
+  if (!values.length) return 0;
+  const alpha = 2 / (days + 1);
+  return values.slice(1).reduce((value, next) => alpha * next + (1 - alpha) * value, values[0]);
+};
 
 export function rankingFeatures(idea = {}) {
   const history = Array.isArray(idea.history) ? idea.history.filter(row => Number.isFinite(row?.close) && row.close > 0) : [];
   const closes = history.map(row => Number(row.close));
   const volumes = history.map(row => numberOr(row.volume, 0));
+  const highs = history.map(row => numberOr(row.high, numberOr(row.close)));
+  const lows = history.map(row => numberOr(row.low, numberOr(row.close)));
   const current = numberOr(idea.price, closes.at(-1) || 0);
   const valueAgo = days => closes.length > days ? closes.at(-1 - days) : current;
   const meanClose = days => average(closes.slice(-days)) || current;
   const ma5 = numberOr(idea.technical?.ma5, meanClose(5));
   const ma20 = numberOr(idea.technical?.ma20, meanClose(20));
   const ma60 = numberOr(idea.technical?.ma60, meanClose(60));
-  const returns = closes.slice(-21).slice(1).map((close, index) => pct(closes.slice(-21)[index], close));
+  const recent61 = closes.slice(-61);
+  const dailyReturns = recent61.slice(1).map((close, index) => pct(recent61[index], close));
+  const volatility5 = deviation(dailyReturns.slice(-5));
+  const volatility20 = deviation(dailyReturns.slice(-20));
   const volume5 = average(volumes.slice(-5));
   const volume20 = average(volumes.slice(-20));
-  const high20 = numberOr(idea.technical?.high20, Math.max(...closes.slice(-20), current));
-  const low20 = numberOr(idea.technical?.low20, Math.min(...closes.slice(-20), current));
+  const volume60 = average(volumes.slice(-60));
+  const high20 = numberOr(idea.technical?.high20, Math.max(...highs.slice(-20), current));
+  const low20 = numberOr(idea.technical?.low20, Math.min(...lows.slice(-20), current));
+  const high60 = Math.max(...highs.slice(-60), current);
+  const low60 = Math.min(...lows.slice(-60), current);
+  const recent15 = closes.slice(-15);
+  const deltas = recent15.slice(1).map((close, index) => close - recent15[index]);
+  const averageGain = average(deltas.map(value => Math.max(0, value)));
+  const averageLoss = average(deltas.map(value => Math.max(0, -value)));
+  const rsi14 = averageLoss > 0 ? 100 - 100 / (1 + averageGain / averageLoss) : averageGain > 0 ? 100 : 50;
+  const macdGap = current > 0 ? ((ema(closes, 12) - ema(closes, 26)) / current) * 100 : 0;
+  const return5 = pct(valueAgo(5), current);
+  const return20 = pct(valueAgo(20), current);
   const evidence = Array.isArray(idea.evidence) ? idea.evidence : [];
   const finance = idea.finance || {};
   return {
-    return5:pct(valueAgo(5), current), return20:pct(valueAgo(20), current), return60:pct(valueAgo(60), current),
+    return1:pct(valueAgo(1), current), return5, return10:pct(valueAgo(10), current),
+    return20, return60:pct(valueAgo(60), current),
     maGap5To20:pct(ma20, ma5), maGap20To60:pct(ma60, ma20),
-    volatility20:numberOr(idea.technical?.volatility20, deviation(returns)),
+    volatility5, volatility20:numberOr(idea.technical?.volatility20, volatility20),
+    volatilityRatio5To20:volatility20 > 0 ? volatility5 / volatility20 : 1,
     volumeRatio5To20:volume20 > 0 ? volume5 / volume20 : 1,
+    volumeRatio5To60:volume60 > 0 ? volume5 / volume60 : 1,
     distanceToHigh20:pct(high20, current), distanceToLow20:pct(low20, current),
+    distanceToHigh60:pct(high60, current), distanceToLow60:pct(low60, current),
+    rsi14, macdGap, momentumAcceleration:return5 - return20 / 4,
     revenueGrowth:numberOr(finance.revenueGrowth), profitGrowth:numberOr(finance.profitGrowth),
     netMargin:numberOr(finance.netMargin), debtRatio:numberOr(finance.debtRatio, 50),
     timedEventCount:evidence.reduce((sum, item) => sum + (item.eventDates || []).filter(date => date.inWindow).length, 0),
