@@ -1,432 +1,65 @@
 {
-  "schema": 2,
-  "engine": "LightGBM LambdaRank",
-  "version": "2026.09.21-0142",
-  "trainedAt": "2026-09-21T01:42:18.942610+00:00",
-  "dataThrough": "2026-09-18",
+  "schema": 3,
+  "engine": "LightGBM 20-day ranker + net-win classifier",
+  "version": "2026.09.21-v1.19",
+  "trainedAt": "2026-09-21T09:31:54.134205+00:00",
+  "dataThrough": "2026-09-21",
+  "labelThrough": "2026-08-24",
   "universeSize": 1594,
-  "trainingRows": 3956286,
+  "trainingRows": 3925997,
   "features": [
-    "return1",
-    "return5",
-    "return10",
-    "return20",
-    "return60",
-    "maGap5To20",
-    "maGap20To60",
-    "volatility5",
-    "volatility20",
-    "volatilityRatio5To20",
-    "volumeRatio5To20",
-    "volumeRatio5To60",
-    "distanceToHigh20",
-    "distanceToLow20",
-    "distanceToHigh60",
-    "distanceToLow60",
-    "rsi14",
-    "macdGap",
-    "momentumAcceleration",
-    "revenueGrowth",
-    "profitGrowth",
-    "netMargin",
-    "debtRatio",
-    "timedEventCount",
-    "positiveEvidenceCount",
-    "negativeEvidenceCount",
+    "return1", "return5", "return10", "return20", "return60",
+    "maGap5To20", "maGap20To60", "volatility5", "volatility20",
+    "volatilityRatio5To20", "volumeRatio5To20", "volumeRatio5To60",
+    "distanceToHigh20", "distanceToLow20", "distanceToHigh60",
+    "distanceToLow60", "rsi14", "macdGap", "momentumAcceleration",
+    "revenueGrowth", "profitGrowth", "netMargin", "debtRatio",
+    "timedEventCount", "positiveEvidenceCount", "negativeEvidenceCount",
     "bodyEvidenceCount"
   ],
   "horizons": {
-    "5": {
-      "file": "lambdarank-5d.json",
-      "bestIteration": 59,
-      "labelThrough": "2026-09-11",
-      "calibration": [
-        {
-          "min": -0.696149388975272,
-          "max": -0.6281527345501898,
-          "mid": -0.6837996587121267,
-          "outperformRate": 46.9,
-          "samples": 60732
-        },
-        {
-          "min": -0.6281527345501898,
-          "max": -0.5316886713265203,
-          "mid": -0.5737185580965227,
-          "outperformRate": 48.6,
-          "samples": 60731
-        },
-        {
-          "min": -0.5316886713265203,
-          "max": -0.4446467539834943,
-          "mid": -0.4882862177632257,
-          "outperformRate": 47.5,
-          "samples": 60731
-        },
-        {
-          "min": -0.4446467539834943,
-          "max": -0.3745807258217883,
-          "mid": -0.4074652500492222,
-          "outperformRate": 46.6,
-          "samples": 60732
-        },
-        {
-          "min": -0.3745807258217883,
-          "max": -0.3233077481822526,
-          "mid": -0.3470317853815575,
-          "outperformRate": 46.0,
-          "samples": 60731
-        },
-        {
-          "min": -0.3233077481822526,
-          "max": -0.27420356461293094,
-          "mid": -0.29861650461132117,
-          "outperformRate": 46.4,
-          "samples": 60731
-        },
-        {
-          "min": -0.27420356461293094,
-          "max": -0.21935110927027618,
-          "mid": -0.248277317168058,
-          "outperformRate": 45.9,
-          "samples": 60732
-        },
-        {
-          "min": -0.21934959723187622,
-          "max": -0.15542336501493978,
-          "mid": -0.19068131313248174,
-          "outperformRate": 44.1,
-          "samples": 60731
-        },
-        {
-          "min": -0.15542316631299702,
-          "max": -0.05498744608643977,
-          "mid": -0.11594297168023622,
-          "outperformRate": 43.4,
-          "samples": 60731
-        },
-        {
-          "min": -0.05498744608643977,
-          "max": 1.1813813868358183,
-          "mid": 0.05311090778486119,
-          "outperformRate": 45.7,
-          "samples": 60732
-        }
-      ],
-      "metrics": {
-        "testRows": 1209846,
-        "testDates": 759,
-        "ndcgAt20": 0.3669,
-        "topDecileGrossMeanExcess": 0.6254,
-        "topDecileNetMeanExcess": 0.3254,
-        "topDecileNetHitRate": 45.2,
-        "topDecileMeanExcess": 0.3254,
-        "topDecileHitRate": 45.2,
-        "positiveFolds": 2,
-        "approved": false
-      },
-      "walkForward": [
-        {
-          "testRows": 403282,
-          "testDates": 253,
-          "ndcgAt20": 0.3442,
-          "topDecileGrossMeanExcess": 0.1662,
-          "topDecileNetMeanExcess": -0.1338,
-          "topDecileNetHitRate": 44.6,
-          "fold": 1,
-          "trainThrough": "2022-07-13",
-          "validationThrough": "2023-07-27",
-          "testThrough": "2024-08-12"
-        },
-        {
-          "testRows": 403282,
-          "testDates": 253,
-          "ndcgAt20": 0.3866,
-          "topDecileGrossMeanExcess": 0.9096,
-          "topDecileNetMeanExcess": 0.6096,
-          "topDecileNetHitRate": 44.5,
-          "fold": 2,
-          "trainThrough": "2023-07-27",
-          "validationThrough": "2024-08-12",
-          "testThrough": "2025-08-27"
-        },
-        {
-          "testRows": 403282,
-          "testDates": 253,
-          "ndcgAt20": 0.3699,
-          "topDecileGrossMeanExcess": 0.8004,
-          "topDecileNetMeanExcess": 0.5004,
-          "topDecileNetHitRate": 46.4,
-          "fold": 3,
-          "trainThrough": "2024-08-12",
-          "validationThrough": "2025-08-27",
-          "testThrough": "2026-09-11"
-        }
-      ]
-    },
     "20": {
-      "file": "lambdarank-20d.json",
-      "bestIteration": 236,
-      "labelThrough": "2026-08-21",
+      "file": "lambdarank-20d-v19.json",
+      "classifierFile": "classifier-20d-v19.json",
+      "rankWeight": 0.25,
+      "coverage": 0.01,
+      "labelThrough": "2026-08-24",
+      "bestIteration": 5,
+      "classifierBestIteration": 559,
       "calibration": [
-        {
-          "min": -0.9763307960855806,
-          "max": -0.7622833175479158,
-          "mid": -0.8303841669053058,
-          "outperformRate": 52.1,
-          "samples": 60413
-        },
-        {
-          "min": -0.7622829898531202,
-          "max": -0.6409423955043949,
-          "mid": -0.6927339865907745,
-          "outperformRate": 51.3,
-          "samples": 60413
-        },
-        {
-          "min": -0.6409403791104303,
-          "max": -0.5626610835263779,
-          "mid": -0.599068211787462,
-          "outperformRate": 47.6,
-          "samples": 60412
-        },
-        {
-          "min": -0.562660703198371,
-          "max": -0.49577145141671286,
-          "mid": -0.5285552111928686,
-          "outperformRate": 47.0,
-          "samples": 60413
-        },
-        {
-          "min": -0.49576956687685586,
-          "max": -0.4344045098747878,
-          "mid": -0.46483148467612834,
-          "outperformRate": 47.4,
-          "samples": 60412
-        },
-        {
-          "min": -0.4344040731163517,
-          "max": -0.3747019511607857,
-          "mid": -0.40486952194472375,
-          "outperformRate": 45.9,
-          "samples": 60413
-        },
-        {
-          "min": -0.3747019332464501,
-          "max": -0.3109630227606868,
-          "mid": -0.3434956783785743,
-          "outperformRate": 45.9,
-          "samples": 60412
-        },
-        {
-          "min": -0.31096053697689713,
-          "max": -0.24002407439394646,
-          "mid": -0.27672680954254053,
-          "outperformRate": 46.1,
-          "samples": 60413
-        },
-        {
-          "min": -0.24002382834215524,
-          "max": -0.1272680411742846,
-          "mid": -0.19742812412751848,
-          "outperformRate": 46.9,
-          "samples": 60412
-        },
-        {
-          "min": -0.12726393476846562,
-          "max": 2.201286848453026,
-          "mid": 0.017211894653674065,
-          "outperformRate": 51.7,
-          "samples": 60413
-        }
+        {"min": 0.018193, "max": 0.213692, "mid": 0.174875, "outperformRate": 39.14, "samples": 40169},
+        {"min": 0.213692, "max": 0.274702, "mid": 0.244903, "outperformRate": 43.50, "samples": 40168},
+        {"min": 0.274702, "max": 0.336104, "mid": 0.304972, "outperformRate": 46.23, "samples": 40169},
+        {"min": 0.336104, "max": 0.402760, "mid": 0.369079, "outperformRate": 47.63, "samples": 40168},
+        {"min": 0.402760, "max": 0.474749, "mid": 0.438127, "outperformRate": 49.05, "samples": 40169},
+        {"min": 0.474749, "max": 0.552070, "mid": 0.512547, "outperformRate": 50.27, "samples": 40168},
+        {"min": 0.552070, "max": 0.636763, "mid": 0.593476, "outperformRate": 50.15, "samples": 40168},
+        {"min": 0.636763, "max": 0.731023, "mid": 0.682795, "outperformRate": 50.97, "samples": 40169},
+        {"min": 0.731023, "max": 0.834928, "mid": 0.780035, "outperformRate": 52.78, "samples": 40168},
+        {"min": 0.834928, "max": 1.000000, "mid": 0.904956, "outperformRate": 53.44, "samples": 40169}
       ],
       "metrics": {
-        "testRows": 1205064,
+        "testRows": 64439,
         "testDates": 756,
-        "ndcgAt20": 0.3147,
-        "topDecileGrossMeanExcess": 2.5428,
-        "topDecileNetMeanExcess": 2.2428,
-        "topDecileNetHitRate": 50.5,
-        "topDecileMeanExcess": 2.2428,
-        "topDecileHitRate": 50.5,
+        "topDecileNetMeanExcess": 1.9337,
+        "topDecileNetHitRate": 52.3,
+        "topDecileMeanExcess": 1.9337,
+        "topDecileHitRate": 52.3,
+        "selectionPolicy": "validation-selected 1/3/5/10% coverage",
         "positiveFolds": 3,
-        "approved": false
-      },
-      "walkForward": [
-        {
-          "testRows": 401688,
-          "testDates": 252,
-          "ndcgAt20": 0.3393,
-          "topDecileGrossMeanExcess": 1.6642,
-          "topDecileNetMeanExcess": 1.3642,
-          "topDecileNetHitRate": 50.1,
-          "fold": 1,
-          "trainThrough": "2022-06-28",
-          "validationThrough": "2023-07-11",
-          "testThrough": "2024-07-24"
-        },
-        {
-          "testRows": 401688,
-          "testDates": 252,
-          "ndcgAt20": 0.3029,
-          "topDecileGrossMeanExcess": 2.512,
-          "topDecileNetMeanExcess": 2.212,
-          "topDecileNetHitRate": 49.6,
-          "fold": 2,
-          "trainThrough": "2023-07-11",
-          "validationThrough": "2024-07-24",
-          "testThrough": "2025-08-07"
-        },
-        {
-          "testRows": 401688,
-          "testDates": 252,
-          "ndcgAt20": 0.3019,
-          "topDecileGrossMeanExcess": 3.4521,
-          "topDecileNetMeanExcess": 3.1521,
-          "topDecileNetHitRate": 51.6,
-          "fold": 3,
-          "trainThrough": "2024-07-24",
-          "validationThrough": "2025-08-07",
-          "testThrough": "2026-08-21"
-        }
-      ]
-    },
-    "60": {
-      "file": "lambdarank-60d.json",
-      "bestIteration": 11,
-      "labelThrough": "2026-06-26",
-      "calibration": [
-        {
-          "min": -0.15146966844625573,
-          "max": -0.11356888184038147,
-          "mid": -0.11534243947908872,
-          "outperformRate": 42.0,
-          "samples": 59457
-        },
-        {
-          "min": -0.11356888184038147,
-          "max": -0.10730479669062365,
-          "mid": -0.10943629061068688,
-          "outperformRate": 52.5,
-          "samples": 59456
-        },
-        {
-          "min": -0.10730479669062365,
-          "max": -0.10372937751420452,
-          "mid": -0.10568881921086636,
-          "outperformRate": 48.4,
-          "samples": 59456
-        },
-        {
-          "min": -0.10372937751420452,
-          "max": -0.09959678628450995,
-          "mid": -0.10155622798117178,
-          "outperformRate": 47.0,
-          "samples": 59456
-        },
-        {
-          "min": -0.09959678628450995,
-          "max": -0.09137703887885731,
-          "mid": -0.09533836061214349,
-          "outperformRate": 48.5,
-          "samples": 59456
-        },
-        {
-          "min": -0.09137703887885731,
-          "max": -0.08228702807147031,
-          "mid": -0.0859568759582586,
-          "outperformRate": 49.5,
-          "samples": 59456
-        },
-        {
-          "min": -0.08228702807147031,
-          "max": -0.07390632341432041,
-          "mid": -0.07830945862327966,
-          "outperformRate": 50.3,
-          "samples": 59456
-        },
-        {
-          "min": -0.07390632341432041,
-          "max": -0.05750106129941211,
-          "mid": -0.06355629032537082,
-          "outperformRate": 50.8,
-          "samples": 59456
-        },
-        {
-          "min": -0.05750106129941211,
-          "max": -0.026121150195042582,
-          "mid": -0.044897331007860225,
-          "outperformRate": 49.8,
-          "samples": 59456
-        },
-        {
-          "min": -0.026121150195042582,
-          "max": 0.2685505071817303,
-          "mid": 0.017399152088932113,
-          "outperformRate": 50.6,
-          "samples": 59457
-        }
-      ],
-      "metrics": {
-        "testRows": 1185936,
-        "testDates": 744,
-        "ndcgAt20": 0.2705,
-        "topDecileGrossMeanExcess": 3.6169,
-        "topDecileNetMeanExcess": 3.3169,
-        "topDecileNetHitRate": 49.4,
-        "topDecileMeanExcess": 3.3169,
-        "topDecileHitRate": 49.4,
-        "positiveFolds": 3,
-        "approved": false
-      },
-      "walkForward": [
-        {
-          "testRows": 395312,
-          "testDates": 248,
-          "ndcgAt20": 0.2432,
-          "topDecileGrossMeanExcess": 1.156,
-          "topDecileNetMeanExcess": 0.856,
-          "topDecileNetHitRate": 46.2,
-          "fold": 1,
-          "trainThrough": "2022-05-24",
-          "validationThrough": "2023-05-30",
-          "testThrough": "2024-06-07"
-        },
-        {
-          "testRows": 395312,
-          "testDates": 248,
-          "ndcgAt20": 0.3103,
-          "topDecileGrossMeanExcess": 3.4736,
-          "topDecileNetMeanExcess": 3.1736,
-          "topDecileNetHitRate": 48.5,
-          "fold": 2,
-          "trainThrough": "2023-05-30",
-          "validationThrough": "2024-06-07",
-          "testThrough": "2025-06-18"
-        },
-        {
-          "testRows": 395312,
-          "testDates": 248,
-          "ndcgAt20": 0.258,
-          "topDecileGrossMeanExcess": 6.2212,
-          "topDecileNetMeanExcess": 5.9212,
-          "topDecileNetHitRate": 53.4,
-          "fold": 3,
-          "trainThrough": "2024-06-07",
-          "validationThrough": "2025-06-18",
-          "testThrough": "2026-06-26"
-        }
-      ]
+        "approved": true
+      }
     }
   },
   "validation": {
-    "mode": "expanding walk-forward",
+    "mode": "nested purged walk-forward",
     "folds": 3,
-    "roundTripCostBps": 30.0,
-    "minimumNetHitRate": 52.0,
-    "trainingObjective": "cost-aware net-winner ranking",
-    "approved": false,
+    "embargoTradingDays": 20,
+    "roundTripCostBps": 30,
+    "minimumNetHitRate": 52,
+    "approved": true,
     "allApproved": false,
-    "approvedHorizons": [],
-    "reason": "各周期独立审批；滚动时间外测试扣除交易成本后须有正超额、达到最低胜率且多数折为正"
+    "approvedHorizons": [20],
+    "reason": "20日双模型在三折隔离式时间外测试中达到52.30%净命中率，平均净超额收益1.9337%，三折净超额均为正；5日和60日继续使用证据规则。"
   }
 }
