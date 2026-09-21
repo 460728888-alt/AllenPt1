@@ -1,13 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelStatus, rankingFeatures, rankIdeas, RANKING_FEATURES } from './ranking-model.js';
+import { evaluateBundleStatus, modelStatus, rankingFeatures, rankIdeas, RANKING_FEATURES } from './ranking-model.js';
 
-test('untrained manifest fails closed instead of inventing model scores', () => {
+test('unapproved or stale manifest fails closed instead of inventing model scores', () => {
   const status = modelStatus();
   assert.equal(status.engine, 'LightGBM LambdaRank');
   assert.equal(status.active, false);
   const ranked = rankIdeas([{symbol:'000001.SZ'},{symbol:'000002.SZ'}],20);
   assert.equal(ranked.items.every(item => item.modelRanking === null), true);
+});
+
+test('approved horizons activate independently when market data is fresh', () => {
+  const bundle={dataThrough:'2026-09-20',horizons:{
+    5:{model:{},metrics:{approved:false}},20:{model:{},metrics:{approved:true}},60:{model:{},metrics:{approved:false}}
+  }};
+  const status=evaluateBundleStatus(bundle,new Date('2026-09-21T00:00:00Z'));
+  assert.deepEqual(status.approvedHorizons,[20]);
+  assert.deepEqual(status.activeHorizons,[20]);
+  assert.equal(status.active,true);
+});
+
+test('freshness gate blocks even an approved horizon', () => {
+  const bundle={dataThrough:'2020-07-03',horizons:{20:{model:{},metrics:{approved:true}}}};
+  const status=evaluateBundleStatus(bundle,new Date('2026-09-21T00:00:00Z'));
+  assert.equal(status.stale,true);
+  assert.deepEqual(status.activeHorizons,[]);
+  assert.equal(status.active,false);
 });
 
 test('ranking feature extraction is finite and uses evidence direction', () => {

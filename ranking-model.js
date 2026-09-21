@@ -63,7 +63,7 @@ function readBundle() {
     const stat = fs.statSync(manifestPath);
     if (cache.bundle && cache.modifiedAt === stat.mtimeMs) return cache;
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    if (manifest.schema !== 1) throw new Error('模型清单版本不兼容');
+    if (![1,2].includes(manifest.schema)) throw new Error('模型清单版本不兼容');
     const horizons = {};
     for (const days of supportedHorizons) {
       const entry = manifest.horizons?.[String(days)];
@@ -102,25 +102,56 @@ function calibratedProbability(raw, calibration = []) {
   return Number.isFinite(Number(bin?.outperformRate)) ? Number(bin.outperformRate) : null;
 }
 
+function freshness(dataThrough, now = new Date(), maxLagDays = Number(process.env.MODEL_MAX_DATA_LAG_DAYS || 14)) {
+  const timestamp = Date.parse(`${dataThrough || ''}T23:59:59Z`);
+  const ageDays = Number.isFinite(timestamp) ? Math.max(0, Math.floor((now.getTime() - timestamp) / 86_400_000)) : null;
+  return {ageDays,maxLagDays,fresh:Number.isFinite(ageDays) && ageDays <= maxLagDays};
+}
+
+export function evaluateBundleStatus(bundle, now = new Date()) {
+  const fresh = freshness(bundle?.dataThrough, now);
+  const horizons = supportedHorizons.map(days => {
+    const entry = bundle?.horizons?.[days] || bundle?.horizons?.[String(days)];
+    const available = Boolean(entry?.model);
+    const approved = Boolean(entry?.metrics?.approved === true);
+    return {days,available,approved,active:available && approved && fresh.fresh,metrics:entry?.metrics || null,labelThrough:entry?.labelThrough || null};
+  });
+  const availableHorizons = horizons.filter(item => item.available).map(item => item.days);
+  const approvedHorizons = horizons.filter(item => item.available && item.approved).map(item => item.days);
+  const activeHorizons = horizons.filter(item => item.active).map(item => item.days);
+  let message = '尚未生成训练模型';
+  if (availableHorizons.length) {
+    if (!approvedHorizons.length) message = '模型文件存在，但各周期均未通过时间外验证，继续使用证据规则';
+    else if (!fresh.fresh) message = `通过验证的周期：${approvedHorizons.join(' / ')}日；但训练数据已滞后${fresh.ageDays ?? '未知'}天，暂不启用`;
+    else message = `已启用通过滚动验证的${activeHorizons.join(' / ')}日模型；其他周期继续使用证据规则`;
+  }
+  return {
+    engine:'LightGBM LambdaRank', available:availableHorizons.length > 0,
+    validated:approvedHorizons.length > 0, active:activeHorizons.length > 0,
+    stale:availableHorizons.length > 0 && !fresh.fresh, dataAgeDays:fresh.ageDays,
+    maxDataLagDays:fresh.maxLagDays, availableHorizons, approvedHorizons, activeHorizons,
+    horizons, message,
+  };
+}
+
 export function modelStatus() {
   const loaded = readBundle();
   const bundle = loaded.bundle;
-  const available = Boolean(bundle && supportedHorizons.every(days => bundle.horizons?.[days]?.model));
-  const validated = Boolean(available && bundle.validation?.approved === true);
+  const evaluated = evaluateBundleStatus(bundle);
   return {
-    engine:'LightGBM LambdaRank', available, validated, active:available && validated,
+    ...evaluated,
     version:bundle?.version || null, trainedAt:bundle?.trainedAt || null,
     dataThrough:bundle?.dataThrough || null, universeSize:bundle?.universeSize || null,
     trainingRows:bundle?.trainingRows || null, validation:bundle?.validation || null,
-    horizons:supportedHorizons.map(days => ({days,metrics:bundle?.horizons?.[days]?.metrics || null})),
-    message:available ? (validated ? '训练模型已通过最低验证门槛，排序已启用' : '模型文件存在，但尚未通过验证门槛，继续使用证据规则') : (loaded.error || '尚未生成训练模型')
+    message:loaded.error || evaluated.message
   };
 }
 
 export function rankIdeas(ideas = [], days = 20) {
   const loaded = readBundle(), bundle = loaded.bundle, entry = bundle?.horizons?.[days];
   const status = modelStatus();
-  if (!status.active || !entry?.model || ideas.length < 2) return { status, items:ideas.map(idea => ({...idea,modelRanking:null})) };
+  const horizonActive = status.horizons.find(item => item.days === Number(days))?.active;
+  if (!horizonActive || !entry?.model || ideas.length < 2) return { status, items:ideas.map(idea => ({...idea,modelRanking:null})) };
   const scored = ideas.map(idea => {
     const features = rankingFeatures(idea);
     const raw = rawPrediction(entry.model, features, bundle.features || RANKING_FEATURES);
@@ -129,4 +160,3 @@ export function rankIdeas(ideas = [], days = 20) {
   const denominator = Math.max(1, scored.length - 1);
   return {status,items:scored.map((item,index) => ({...item,modelRanking:{...item.modelRanking,rank:index+1,percentile:Number(((1-index/denominator)*100).toFixed(1)),candidateCount:scored.length}}))};
 }
-
