@@ -7,6 +7,7 @@ import { radarWindow, radarCandidate, mapLimit } from './opportunity.js';
 import {registerRadar,initRadarTables} from './radar-api.js';
 import { modelStatus, rankIdeas } from './ranking-model.js';
 import {foundationForecast,committeeDecision,forecastStatus} from './forecast-client.js';
+import {analyzeVolumeStructure} from './volume-structure.js';
 const radarReports = [];
 const radarBusy = new Set();
 
@@ -21,6 +22,7 @@ const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
 const memoryAnnouncements = [
+  {id:12,slug:'volume-structure-v1-21',title:'趋势预测中心新增量价结构',content:'趋势预测中心现在默认先显示量价结构，自动识别回调、横盘蓄势、上沿试探、放量突破、回踩与结构失效；原有5、20、60日模型概率完整保留在第二页签。突破与失效均要求收盘和成交量共同确认。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:11,slug:'allen-model-committee-v1-15',title:'Allen模型委员会已接入',content:'趋势预测中心新增Amazon Chronos-Bolt预训练模型接口，并与原有历史统计模型分别展示、相互核验。只有方向一致才标记模型共振；模型分歧或预训练服务不可用时继续等待。尚未训练的LightGBM不会参与投票。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:10,slug:'lambdarank-v1-14',title:'Allen排序模型框架已上线',content:'未来机会雷达已接入 LightGBM LambdaRank 排序接口，并公开显示模型版本、训练样本和时间外验证状态。只有5、20、60日模型文件齐全且通过验证门槛时才会启用；否则自动使用原证据规则，绝不把未训练分数冒充预测概率。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:9,slug:'allen-evidence-v1-12',title:'Allen证据研究与跟踪卡已更新',content:'机会雷达改为扫描最近1000或3000条公告，分层读取正文、检查历史涨幅与财务。新增个人研究卡、原始判断复核和事件时间线。扫描量是公告条数，不代表覆盖全部股票；每份报告显示实际覆盖及缺失。',level:'更新',active:true,created_at:new Date().toISOString()},
@@ -139,6 +141,7 @@ async function initUsers() {
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('allen-evidence-v1-12','Allen证据研究与跟踪卡已更新','机会雷达扫描最近1000或3000条公告，分层读取正文、历史涨幅和财务。新增个人研究卡、复核记录和事件时间线。公告条数不等于股票数量；每份报告展示覆盖和缺失。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('lambdarank-v1-14','Allen排序模型框架已上线','未来机会雷达已接入 LightGBM LambdaRank 排序接口，并公开显示模型版本、训练样本和时间外验证状态。只有5、20、60日模型文件齐全且通过验证门槛时才会启用；否则自动使用原证据规则，绝不把未训练分数冒充预测概率。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('allen-model-committee-v1-15','Allen模型委员会已接入','趋势预测中心新增Amazon Chronos-Bolt预训练模型接口，并与原有历史统计模型分别展示、相互核验。只有方向一致才标记模型共振；模型分歧或预训练服务不可用时继续等待。尚未训练的LightGBM不会参与投票。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('volume-structure-v1-21','趋势预测中心新增量价结构','趋势预测中心现在默认先显示量价结构，自动识别回调、横盘蓄势、上沿试探、放量突破、回踩与结构失效；原有5、20、60日模型概率完整保留在第二页签。突破与失效均要求收盘和成交量共同确认。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -548,7 +551,12 @@ async function getDailySeries(rawSymbol) {
   const rows = (result.timestamp || []).map((time, index) => {
     const adjustedClose=finiteNumber(adjusted[index]), rawClose=finiteNumber(quote.close?.[index]);
     const close=adjustedClose>0?adjustedClose:rawClose>0?rawClose:null;
-    return {time,close,volume:finiteNumber(quote.volume?.[index])};
+    const factor=rawClose>0&&close>0?close/rawClose:1;
+    return {time,close,
+      open:finiteNumber(quote.open?.[index])*factor,
+      high:finiteNumber(quote.high?.[index])*factor,
+      low:finiteNumber(quote.low?.[index])*factor,
+      volume:finiteNumber(quote.volume?.[index])};
   }).filter(row => Number.isFinite(row.close) && row.close > 0);
   if (rows.length < 160) throw new Error('有效历史数据不足，暂时无法计算趋势概率');
   const meta = result.meta || {};
@@ -658,6 +666,7 @@ async function buildPrediction(rawSymbol) {
     dataThrough:new Date(last.time*1000).toISOString().slice(0,10), benchmark:'上证综合指数', historyDays:comparableRows.length,
     market:{regime:marketRegime,twentyDayAverage:benchmarkMa20,sixtyDayAverage:benchmarkMa60,twentyDayMomentum:benchmarkMomentum20},
     horizons,
+    volumeStructure:analyzeVolumeStructure(comparableRows),
     modelCommittee:{
       pretrainedAvailable:Boolean(pretrained.available),engine:pretrained.engine||null,model:pretrained.model||null,
       models:pretrained.models||[],reason:pretrained.reason||null,error:pretrained.error||null,
@@ -710,7 +719,7 @@ async function predictionScorecard(userId){
   return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.20.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.21.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
 app.get('/api/model/status', auth, (_req,res) => res.json(modelStatus()));
 app.get('/api/session',async(req,res)=>{
   try{
