@@ -1,0 +1,182 @@
+{
+  "schema": 1,
+  "engine": "LightGBM 20-day ranker + net-win classifier",
+  "trainedAt": "2026-09-21T09:31:54.134205+00:00",
+  "labelThrough": "2026-08-24",
+  "rows": 3925997,
+  "symbols": 1594,
+  "roundTripCostBps": 30.0,
+  "validation": {
+    "mode": "nested purged walk-forward",
+    "embargoTradingDays": 20,
+    "folds": [
+      {
+        "fold": 1,
+        "trainThrough": "2019-05-20",
+        "validationFrom": "2019-06-19",
+        "validationThrough": "2020-07-01",
+        "testFrom": "2020-07-30",
+        "testThrough": "2021-08-10",
+        "embargoTradingDays": 20,
+        "validationChoice": {
+          "samples": 19812,
+          "dates": 252,
+          "coverage": 0.05,
+          "rankWeight": 0.75,
+          "netMeanExcess": 3.3732,
+          "netHitRate": 57.47,
+          "positiveDayRate": 90.87
+        },
+        "testMetrics": {
+          "samples": 20087,
+          "dates": 252,
+          "coverage": 0.05,
+          "rankWeight": 0.75,
+          "netMeanExcess": 3.3217,
+          "netHitRate": 53.85,
+          "positiveDayRate": 85.71
+        }
+      },
+      {
+        "fold": 2,
+        "trainThrough": "2021-06-15",
+        "validationFrom": "2021-07-14",
+        "validationThrough": "2022-07-27",
+        "testFrom": "2022-08-25",
+        "testThrough": "2023-09-06",
+        "embargoTradingDays": 20,
+        "validationChoice": {
+          "samples": 40306,
+          "dates": 252,
+          "coverage": 0.1,
+          "rankWeight": 0.0,
+          "netMeanExcess": 1.5334,
+          "netHitRate": 50.42,
+          "positiveDayRate": 76.19
+        },
+        "testMetrics": {
+          "samples": 40320,
+          "dates": 252,
+          "coverage": 0.1,
+          "rankWeight": 0.0,
+          "netMeanExcess": 1.1038,
+          "netHitRate": 51.3,
+          "positiveDayRate": 80.16
+        }
+      },
+      {
+        "fold": 3,
+        "trainThrough": "2023-07-12",
+        "validationFrom": "2023-08-10",
+        "validationThrough": "2024-08-22",
+        "testFrom": "2024-09-24",
+        "testThrough": "2025-10-13",
+        "embargoTradingDays": 20,
+        "validationChoice": {
+          "samples": 4032,
+          "dates": 252,
+          "coverage": 0.01,
+          "rankWeight": 0.0,
+          "netMeanExcess": 2.9517,
+          "netHitRate": 59.8,
+          "positiveDayRate": 74.6
+        },
+        "testMetrics": {
+          "samples": 4032,
+          "dates": 252,
+          "coverage": 0.01,
+          "rankWeight": 0.0,
+          "netMeanExcess": 3.3175,
+          "netHitRate": 54.64,
+          "positiveDayRate": 75.79
+        }
+      }
+    ],
+    "weightedNetHitRate": 52.3,
+    "weightedNetMeanExcess": 1.9337,
+    "positiveFolds": 3,
+    "approved": true,
+    "minimumNetHitRate": 52.0
+  },
+  "deploymentCandidate": {
+    "rankerFile": "lambdarank-20d-v19.json",
+    "classifierFile": "classifier-20d-v19.json",
+    "rankWeight": 0.25,
+    "coverage": 0.01,
+    "rankerBestIteration": 5,
+    "classifierBestIteration": 559,
+    "calibration": [
+      {
+        "min": 0.018193,
+        "max": 0.213692,
+        "mid": 0.174875,
+        "outperformRate": 39.14,
+        "samples": 40169
+      },
+      {
+        "min": 0.213692,
+        "max": 0.274702,
+        "mid": 0.244903,
+        "outperformRate": 43.5,
+        "samples": 40168
+      },
+      {
+        "min": 0.274702,
+        "max": 0.336104,
+        "mid": 0.304972,
+        "outperformRate": 46.23,
+        "samples": 40169
+      },
+      {
+        "min": 0.336104,
+        "max": 0.40276,
+        "mid": 0.369079,
+        "outperformRate": 47.63,
+        "samples": 40168
+      },
+      {
+        "min": 0.40276,
+        "max": 0.474749,
+        "mid": 0.438127,
+        "outperformRate": 49.05,
+        "samples": 40169
+      },
+      {
+        "min": 0.474749,
+        "max": 0.55207,
+        "mid": 0.512547,
+        "outperformRate": 50.27,
+        "samples": 40168
+      },
+      {
+        "min": 0.55207,
+        "max": 0.636763,
+        "mid": 0.593476,
+        "outperformRate": 50.15,
+        "samples": 40168
+      },
+      {
+        "min": 0.636763,
+        "max": 0.731023,
+        "mid": 0.682795,
+        "outperformRate": 50.97,
+        "samples": 40169
+      },
+      {
+        "min": 0.731023,
+        "max": 0.834928,
+        "mid": 0.780035,
+        "outperformRate": 52.78,
+        "samples": 40168
+      },
+      {
+        "min": 0.834928,
+        "max": 1.0,
+        "mid": 0.904956,
+        "outperformRate": 53.44,
+        "samples": 40169
+      }
+    ],
+    "enabled": true
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema": 3,
+  "engine": "LightGBM 20-day ranker + net-win classifier",
+  "version": "2026.09.21-v1.19",
+  "trainedAt": "2026-09-21T09:31:54.134205+00:00",
+  "dataThrough": "2026-09-21",
+  "labelThrough": "2026-08-24",
+  "universeSize": 1594,
+  "trainingRows": 3925997,
+  "features": [
+    "return1", "return5", "return10", "return20", "return60",
+    "maGap5To20", "maGap20To60", "volatility5", "volatility20",
+    "volatilityRatio5To20", "volumeRatio5To20", "volumeRatio5To60",
+    "distanceToHigh20", "distanceToLow20", "distanceToHigh60",
+    "distanceToLow60", "rsi14", "macdGap", "momentumAcceleration",
+    "revenueGrowth", "profitGrowth", "netMargin", "debtRatio",
+    "timedEventCount", "positiveEvidenceCount", "negativeEvidenceCount",
+    "bodyEvidenceCount"
+  ],
+  "horizons": {
+    "20": {
+      "file": "lambdarank-20d-v19.json",
+      "classifierFile": "classifier-20d-v19.json",
+      "rankWeight": 0.25,
+      "coverage": 0.01,
+      "labelThrough": "2026-08-24",
+      "bestIteration": 5,
+      "classifierBestIteration": 559,
+      "calibration": [
+        {"min": 0.018193, "max": 0.213692, "mid": 0.174875, "outperformRate": 39.14, "samples": 40169},
+        {"min": 0.213692, "max": 0.274702, "mid": 0.244903, "outperformRate": 43.50, "samples": 40168},
+        {"min": 0.274702, "max": 0.336104, "mid": 0.304972, "outperformRate": 46.23, "samples": 40169},
+        {"min": 0.336104, "max": 0.402760, "mid": 0.369079, "outperformRate": 47.63, "samples": 40168},
+        {"min": 0.402760, "max": 0.474749, "mid": 0.438127, "outperformRate": 49.05, "samples": 40169},
+        {"min": 0.474749, "max": 0.552070, "mid": 0.512547, "outperformRate": 50.27, "samples": 40168},
+        {"min": 0.552070, "max": 0.636763, "mid": 0.593476, "outperformRate": 50.15, "samples": 40168},
+        {"min": 0.636763, "max": 0.731023, "mid": 0.682795, "outperformRate": 50.97, "samples": 40169},
+        {"min": 0.731023, "max": 0.834928, "mid": 0.780035, "outperformRate": 52.78, "samples": 40168},
+        {"min": 0.834928, "max": 1.000000, "mid": 0.904956, "outperformRate": 53.44, "samples": 40169}
+      ],
+      "metrics": {
+        "testRows": 64439,
+        "testDates": 756,
+        "topDecileNetMeanExcess": 1.9337,
+        "topDecileNetHitRate": 52.3,
+        "topDecileMeanExcess": 1.9337,
+        "topDecileHitRate": 52.3,
+        "selectionPolicy": "validation-selected 1/3/5/10% coverage",
+        "positiveFolds": 3,
+        "approved": true
+      }
+    }
+  },
+  "validation": {
+    "mode": "nested purged walk-forward",
+    "folds": 3,
+    "embargoTradingDays": 20,
+    "roundTripCostBps": 30,
+    "minimumNetHitRate": 52,
+    "approved": true,
+    "allApproved": false,
+    "approvedHorizons": [20],
+    "reason": "20日双模型在三折隔离式时间外测试中达到52.30%净命中率，平均净超额收益1.9337%，三折净超额均为正；5日和60日继续使用证据规则。"
+  }
+}
