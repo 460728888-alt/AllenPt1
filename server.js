@@ -22,6 +22,7 @@ const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
 const memoryAnnouncements = [
+  {id:13,slug:'plain-volume-ui-v1-22',title:'量价判断改成简单模式',content:'趋势预测中心的量价结构页现在先用红黄绿告诉你“现在该做什么”，并直接显示“什么时候可以买”和“什么时候放弃”。专业数据没有删除，统一放到“查看详细分析”中。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:12,slug:'volume-structure-v1-21',title:'趋势预测中心新增量价结构',content:'趋势预测中心现在默认先显示量价结构，自动识别回调、横盘蓄势、上沿试探、放量突破、回踩与结构失效；原有5、20、60日模型概率完整保留在第二页签。突破与失效均要求收盘和成交量共同确认。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:11,slug:'allen-model-committee-v1-15',title:'Allen模型委员会已接入',content:'趋势预测中心新增Amazon Chronos-Bolt预训练模型接口，并与原有历史统计模型分别展示、相互核验。只有方向一致才标记模型共振；模型分歧或预训练服务不可用时继续等待。尚未训练的LightGBM不会参与投票。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:10,slug:'lambdarank-v1-14',title:'Allen排序模型框架已上线',content:'未来机会雷达已接入 LightGBM LambdaRank 排序接口，并公开显示模型版本、训练样本和时间外验证状态。只有5、20、60日模型文件齐全且通过验证门槛时才会启用；否则自动使用原证据规则，绝不把未训练分数冒充预测概率。',level:'更新',active:true,created_at:new Date().toISOString()},
@@ -142,6 +143,7 @@ async function initUsers() {
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('lambdarank-v1-14','Allen排序模型框架已上线','未来机会雷达已接入 LightGBM LambdaRank 排序接口，并公开显示模型版本、训练样本和时间外验证状态。只有5、20、60日模型文件齐全且通过验证门槛时才会启用；否则自动使用原证据规则，绝不把未训练分数冒充预测概率。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('allen-model-committee-v1-15','Allen模型委员会已接入','趋势预测中心新增Amazon Chronos-Bolt预训练模型接口，并与原有历史统计模型分别展示、相互核验。只有方向一致才标记模型共振；模型分歧或预训练服务不可用时继续等待。尚未训练的LightGBM不会参与投票。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('volume-structure-v1-21','趋势预测中心新增量价结构','趋势预测中心现在默认先显示量价结构，自动识别回调、横盘蓄势、上沿试探、放量突破、回踩与结构失效；原有5、20、60日模型概率完整保留在第二页签。突破与失效均要求收盘和成交量共同确认。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('plain-volume-ui-v1-22','量价判断改成简单模式','趋势预测中心的量价结构页现在先用红黄绿告诉你“现在该做什么”，并直接显示“什么时候可以买”和“什么时候放弃”。专业数据没有删除，统一放到“查看详细分析”中。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -719,7 +721,7 @@ async function predictionScorecard(userId){
   return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.21.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.22.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
 app.get('/api/model/status', auth, (_req,res) => res.json(modelStatus()));
 app.get('/api/session',async(req,res)=>{
   try{
