@@ -26,6 +26,7 @@ const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
 const memoryAnnouncements = [
+  {id:15,slug:'volume-screen-expanded-v1-24',title:'量价筛选范围已扩大',content:'量价机会筛选现在会分批检查约1200只成交活跃A股，并在页面显示扫描进度。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:14,slug:'volume-screen-v1-23',title:'量价机会筛选已上线',content:'系统会从成交活跃的A股中寻找“先回调、再缩量横盘、低点不再下移”的股票。页面只显示为什么入选、涨到哪里算确认、跌到哪里就放弃。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:13,slug:'plain-volume-ui-v1-22',title:'量价判断改成简单模式',content:'趋势预测中心的量价结构页现在先用红黄绿告诉你“现在该做什么”，并直接显示“什么时候可以买”和“什么时候放弃”。专业数据没有删除，统一放到“查看详细分析”中。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:12,slug:'volume-structure-v1-21',title:'趋势预测中心新增量价结构',content:'趋势预测中心现在默认先显示量价结构，自动识别回调、横盘蓄势、上沿试探、放量突破、回踩与结构失效；原有5、20、60日模型概率完整保留在第二页签。突破与失效均要求收盘和成交量共同确认。',level:'更新',active:true,created_at:new Date().toISOString()},
@@ -161,6 +162,7 @@ async function initUsers() {
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('volume-structure-v1-21','趋势预测中心新增量价结构','趋势预测中心现在默认先显示量价结构，自动识别回调、横盘蓄势、上沿试探、放量突破、回踩与结构失效；原有5、20、60日模型概率完整保留在第二页签。突破与失效均要求收盘和成交量共同确认。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('plain-volume-ui-v1-22','量价判断改成简单模式','趋势预测中心的量价结构页现在先用红黄绿告诉你“现在该做什么”，并直接显示“什么时候可以买”和“什么时候放弃”。专业数据没有删除，统一放到“查看详细分析”中。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('volume-screen-v1-23','量价机会筛选已上线','系统会从成交活跃的A股中寻找“先回调、再缩量横盘、低点不再下移”的股票。页面只显示为什么入选、涨到哪里算确认、跌到哪里就放弃。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('volume-screen-expanded-v1-24','量价筛选范围已扩大','量价机会筛选现在会分批检查约1200只成交活跃A股，并在页面显示扫描进度。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -520,25 +522,33 @@ async function latestVolumeScreen(userId){
   return memoryVolumeScreenRuns.find(item=>item.userId===String(userId))||null;
 }
 
-async function runVolumeScreen(userId,limit=160){
+async function runVolumeScreen(userId,limit=1200,onProgress=()=>{}){
   const snapshot=await getLiquidAMarketSnapshot(),tracked=await getVolumeTracks(userId);
   const prior=new Map(tracked.map(item=>[item.symbol,item]));
   const liquid=[...snapshot.rows].sort((a,b)=>(b.amount||0)-(a.amount||0)).slice(0,limit);
   const source=[...new Map([...tracked.map(item=>({symbol:item.symbol,name:item.name,amount:Infinity})),...liquid].map(item=>[item.symbol,item])).values()];
-  const checked=await mapLimit(source,8,async item=>{
-    const stock=await getStockData(item.symbol,{withNews:false});
-    const structure=analyzeVolumeStructure(stock.history),profile=buildVolumeScreenProfile(stock.history,structure);
-    const label=classifyVolumeCandidate(structure,profile,{wasTracked:prior.has(stock.symbol)});
-    if(!label)return null;
-    return {
-      symbol:stock.symbol,code:stock.code,name:stock.name,price:Number(stock.price.toFixed(2)),
-      dataThrough:stock.history.at(-1)?.date||null,...label,
-      confirmPrice:structure.prices.confirm,giveUpPrice:structure.prices.invalidation,targetPrice:profile.priorHigh,
-      riskReward:profile.riskReward,stage:structure.stage,volumeRatio:structure.volume.ratio,
-      pullbackPct:profile.pullbackPct,firstSeenAt:prior.get(stock.symbol)?.firstSeenAt||new Date().toISOString()
-    };
-  });
-  const items=checked.filter(item=>item.ok&&item.value).map(item=>item.value).sort((a,b)=>a.rank-b.rank||b.riskReward-a.riskReward).slice(0,40);
+  const checked=[],batchSize=120;
+  onProgress({checked:0,total:source.length,found:0,failed:0});
+  for(let start=0;start<source.length;start+=batchSize){
+    const batch=source.slice(start,start+batchSize);
+    const batchResults=await mapLimit(batch,8,async item=>{
+      const stock=await getStockData(item.symbol,{withNews:false});
+      const structure=analyzeVolumeStructure(stock.history),profile=buildVolumeScreenProfile(stock.history,structure);
+      const label=classifyVolumeCandidate(structure,profile,{wasTracked:prior.has(stock.symbol)});
+      if(!label)return null;
+      return {
+        symbol:stock.symbol,code:stock.code,name:stock.name,price:Number(stock.price.toFixed(2)),
+        dataThrough:stock.history.at(-1)?.date||null,...label,
+        confirmPrice:structure.prices.confirm,giveUpPrice:structure.prices.invalidation,targetPrice:profile.priorHigh,
+        riskReward:profile.riskReward,stage:structure.stage,volumeRatio:structure.volume.ratio,
+        pullbackPct:profile.pullbackPct,firstSeenAt:prior.get(stock.symbol)?.firstSeenAt||new Date().toISOString()
+      };
+    });
+    checked.push(...batchResults);
+    onProgress({checked:checked.length,total:source.length,found:checked.filter(item=>item.ok&&item.value).length,failed:checked.filter(item=>!item.ok).length});
+    if(start+batchSize<source.length)await new Promise(resolve=>setTimeout(resolve,250));
+  }
+  const items=checked.filter(item=>item.ok&&item.value).map(item=>item.value).sort((a,b)=>a.rank-b.rank||(b.riskReward||0)-(a.riskReward||0)).slice(0,60);
   const result={id:crypto.randomUUID(),createdAt:new Date().toISOString(),coverage:{market:snapshot.rows.length,checked:source.length,usable:checked.filter(item=>item.ok).length,failed:checked.filter(item=>!item.ok).length},items};
   await saveVolumeScreen(userId,result);
   return result;
@@ -788,7 +798,7 @@ async function predictionScorecard(userId){
   return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.23.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.24.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
 app.get('/api/model/status', auth, (_req,res) => res.json(modelStatus()));
 app.get('/api/session',async(req,res)=>{
   try{
@@ -955,12 +965,18 @@ app.get('/api/volume-screen/latest',auth,async(req,res)=>{
 });
 
 app.post('/api/volume-screen',auth,async(req,res)=>{
-  const jobId=crypto.randomUUID(),userId=String(req.user.id),limit=Math.max(60,Math.min(300,Number(req.body.limit)||160));
-  volumeScreenJobs.set(jobId,{id:jobId,userId,status:'running',createdAt:new Date().toISOString()});
-  runVolumeScreen(req.user.id,limit).then(result=>{
-    volumeScreenJobs.set(jobId,{id:jobId,userId,status:'done',createdAt:new Date().toISOString(),result});
+  const userId=String(req.user.id),running=[...volumeScreenJobs.values()].find(job=>job.userId===userId&&job.status==='running');
+  if(running)return res.status(202).json({jobId:running.id,reused:true});
+  const jobId=crypto.randomUUID(),limit=Math.max(160,Math.min(1600,Number(req.body.limit)||1200));
+  volumeScreenJobs.set(jobId,{id:jobId,userId,status:'running',createdAt:new Date().toISOString(),progress:{checked:0,total:limit,found:0,failed:0}});
+  runVolumeScreen(req.user.id,limit,progress=>{
+    const job=volumeScreenJobs.get(jobId);if(job)job.progress=progress;
+  }).then(result=>{
+    const job=volumeScreenJobs.get(jobId)||{};
+    volumeScreenJobs.set(jobId,{...job,id:jobId,userId,status:'done',finishedAt:new Date().toISOString(),progress:{checked:result.coverage.checked,total:result.coverage.checked,found:result.items.length,failed:result.coverage.failed},result});
   }).catch(error=>{
-    volumeScreenJobs.set(jobId,{id:jobId,userId,status:'failed',createdAt:new Date().toISOString(),error:error.message||'筛选失败'});
+    const job=volumeScreenJobs.get(jobId)||{};
+    volumeScreenJobs.set(jobId,{...job,id:jobId,userId,status:'failed',finishedAt:new Date().toISOString(),error:error.message||'筛选失败'});
   });
   res.status(202).json({jobId});
 });
