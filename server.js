@@ -8,8 +8,12 @@ import {registerRadar,initRadarTables} from './radar-api.js';
 import { modelStatus, rankIdeas } from './ranking-model.js';
 import {foundationForecast,committeeDecision,forecastStatus} from './forecast-client.js';
 import {analyzeVolumeStructure} from './volume-structure.js';
+import {buildVolumeScreenProfile,classifyVolumeCandidate} from './volume-screen.js';
 const radarReports = [];
 const radarBusy = new Set();
+const volumeScreenJobs = new Map();
+const memoryVolumeScreenRuns = [];
+const memoryVolumeTracks = new Map();
 
 const app = express();
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +26,7 @@ const AI_MODEL = process.env.AI_MODEL || 'deepseek-chat';
 const sessions = new Map();
 const memoryUsers = new Map();
 const memoryAnnouncements = [
+  {id:14,slug:'volume-screen-v1-23',title:'量价机会筛选已上线',content:'系统会从成交活跃的A股中寻找“先回调、再缩量横盘、低点不再下移”的股票。页面只显示为什么入选、涨到哪里算确认、跌到哪里就放弃。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:13,slug:'plain-volume-ui-v1-22',title:'量价判断改成简单模式',content:'趋势预测中心的量价结构页现在先用红黄绿告诉你“现在该做什么”，并直接显示“什么时候可以买”和“什么时候放弃”。专业数据没有删除，统一放到“查看详细分析”中。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:12,slug:'volume-structure-v1-21',title:'趋势预测中心新增量价结构',content:'趋势预测中心现在默认先显示量价结构，自动识别回调、横盘蓄势、上沿试探、放量突破、回踩与结构失效；原有5、20、60日模型概率完整保留在第二页签。突破与失效均要求收盘和成交量共同确认。',level:'更新',active:true,created_at:new Date().toISOString()},
   {id:11,slug:'allen-model-committee-v1-15',title:'Allen模型委员会已接入',content:'趋势预测中心新增Amazon Chronos-Bolt预训练模型接口，并与原有历史统计模型分别展示、相互核验。只有方向一致才标记模型共振；模型分歧或预训练服务不可用时继续等待。尚未训练的LightGBM不会参与投票。',level:'更新',active:true,created_at:new Date().toISOString()},
@@ -127,6 +132,17 @@ async function initUsers() {
     content TEXT NOT NULL, level VARCHAR(20) NOT NULL DEFAULT '提醒', read_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(user_id,alert_key)
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS volume_screen_runs (
+    id TEXT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), result_json JSONB NOT NULL
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS volume_screen_tracks (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, symbol VARCHAR(24) NOT NULL,
+    name VARCHAR(120) NOT NULL, status VARCHAR(40) NOT NULL, result_json JSONB NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY(user_id,symbol)
+  )`);
   await pool.query('CREATE INDEX IF NOT EXISTS prediction_runs_user_symbol_idx ON prediction_runs(user_id,symbol,created_at DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS signal_snapshots_user_symbol_idx ON signal_snapshots(user_id,symbol,data_date DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions(user_id,last_seen_at DESC)');
@@ -144,6 +160,7 @@ async function initUsers() {
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('allen-model-committee-v1-15','Allen模型委员会已接入','趋势预测中心新增Amazon Chronos-Bolt预训练模型接口，并与原有历史统计模型分别展示、相互核验。只有方向一致才标记模型共振；模型分歧或预训练服务不可用时继续等待。尚未训练的LightGBM不会参与投票。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('volume-structure-v1-21','趋势预测中心新增量价结构','趋势预测中心现在默认先显示量价结构，自动识别回调、横盘蓄势、上沿试探、放量突破、回踩与结构失效；原有5、20、60日模型概率完整保留在第二页签。突破与失效均要求收盘和成交量共同确认。','更新') ON CONFLICT(slug) DO NOTHING`);
   await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('plain-volume-ui-v1-22','量价判断改成简单模式','趋势预测中心的量价结构页现在先用红黄绿告诉你“现在该做什么”，并直接显示“什么时候可以买”和“什么时候放弃”。专业数据没有删除，统一放到“查看详细分析”中。','更新') ON CONFLICT(slug) DO NOTHING`);
+  await pool.query(`INSERT INTO announcements(slug,title,content,level) VALUES('volume-screen-v1-23','量价机会筛选已上线','系统会从成交活跃的A股中寻找“先回调、再缩量横盘、低点不再下移”的股票。页面只显示为什么入选、涨到哪里算确认、跌到哪里就放弃。','更新') ON CONFLICT(slug) DO NOTHING`);
 }
 async function findUser(username) {
   if (!pool) return memoryUsers.get(username) || null;
@@ -477,6 +494,56 @@ async function getUserState(userId) {
   return memoryUserStates.get(String(userId))||null;
 }
 
+async function getVolumeTracks(userId){
+  if(pool)return (await pool.query(`SELECT symbol,name,status,result_json AS result,first_seen_at AS "firstSeenAt",last_seen_at AS "lastSeenAt",expires_at AS "expiresAt",active FROM volume_screen_tracks WHERE user_id=$1 AND expires_at>NOW() ORDER BY first_seen_at`,[userId])).rows;
+  return [...memoryVolumeTracks.values()].filter(item=>item.userId===String(userId)&&new Date(item.expiresAt)>new Date());
+}
+
+async function saveVolumeScreen(userId,result){
+  if(pool){
+    await pool.query('INSERT INTO volume_screen_runs(id,user_id,result_json) VALUES($1,$2,$3)',[result.id,userId,JSON.stringify(result)]);
+    for(const item of result.items){
+      await pool.query(`INSERT INTO volume_screen_tracks(user_id,symbol,name,status,result_json,expires_at,active) VALUES($1,$2,$3,$4,$5,NOW()+INTERVAL '30 days',$6) ON CONFLICT(user_id,symbol) DO UPDATE SET name=EXCLUDED.name,status=EXCLUDED.status,result_json=EXCLUDED.result_json,last_seen_at=NOW(),expires_at=EXCLUDED.expires_at,active=EXCLUDED.active`,[userId,item.symbol,item.name,item.status,JSON.stringify(item),item.tone!=='red']);
+    }
+    return;
+  }
+  memoryVolumeScreenRuns.unshift({userId:String(userId),...result});
+  if(memoryVolumeScreenRuns.length>100)memoryVolumeScreenRuns.length=100;
+  for(const item of result.items){
+    const key=`${userId}:${item.symbol}`,old=memoryVolumeTracks.get(key);
+    memoryVolumeTracks.set(key,{userId:String(userId),symbol:item.symbol,name:item.name,status:item.status,result:item,firstSeenAt:old?.firstSeenAt||result.createdAt,lastSeenAt:result.createdAt,expiresAt:new Date(Date.now()+30*864e5).toISOString(),active:item.tone!=='red'});
+  }
+}
+
+async function latestVolumeScreen(userId){
+  if(pool)return (await pool.query(`SELECT result_json AS result FROM volume_screen_runs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`,[userId])).rows[0]?.result||null;
+  return memoryVolumeScreenRuns.find(item=>item.userId===String(userId))||null;
+}
+
+async function runVolumeScreen(userId,limit=160){
+  const snapshot=await getLiquidAMarketSnapshot(),tracked=await getVolumeTracks(userId);
+  const prior=new Map(tracked.map(item=>[item.symbol,item]));
+  const liquid=[...snapshot.rows].sort((a,b)=>(b.amount||0)-(a.amount||0)).slice(0,limit);
+  const source=[...new Map([...tracked.map(item=>({symbol:item.symbol,name:item.name,amount:Infinity})),...liquid].map(item=>[item.symbol,item])).values()];
+  const checked=await mapLimit(source,8,async item=>{
+    const stock=await getStockData(item.symbol,{withNews:false});
+    const structure=analyzeVolumeStructure(stock.history),profile=buildVolumeScreenProfile(stock.history,structure);
+    const label=classifyVolumeCandidate(structure,profile,{wasTracked:prior.has(stock.symbol)});
+    if(!label)return null;
+    return {
+      symbol:stock.symbol,code:stock.code,name:stock.name,price:Number(stock.price.toFixed(2)),
+      dataThrough:stock.history.at(-1)?.date||null,...label,
+      confirmPrice:structure.prices.confirm,giveUpPrice:structure.prices.invalidation,targetPrice:profile.priorHigh,
+      riskReward:profile.riskReward,stage:structure.stage,volumeRatio:structure.volume.ratio,
+      pullbackPct:profile.pullbackPct,firstSeenAt:prior.get(stock.symbol)?.firstSeenAt||new Date().toISOString()
+    };
+  });
+  const items=checked.filter(item=>item.ok&&item.value).map(item=>item.value).sort((a,b)=>a.rank-b.rank||b.riskReward-a.riskReward).slice(0,40);
+  const result={id:crypto.randomUUID(),createdAt:new Date().toISOString(),coverage:{market:snapshot.rows.length,checked:source.length,usable:checked.filter(item=>item.ok).length,failed:checked.filter(item=>!item.ok).length},items};
+  await saveVolumeScreen(userId,result);
+  return result;
+}
+
 async function addUserAlert(userId, alert) {
   if(pool){
     await pool.query(`INSERT INTO user_alerts(user_id,alert_key,symbol,title,content,level) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id,alert_key) DO NOTHING`,[userId,alert.key,alert.symbol||null,alert.title,alert.content,alert.level||'提醒']);
@@ -721,7 +788,7 @@ async function predictionScorecard(userId){
   return {overall:summarize(evaluations),horizons:[5,20,60].map(days=>({days,...summarize(evaluations.filter(x=>x.days===days))}))};
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.22.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.23.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
 app.get('/api/model/status', auth, (_req,res) => res.json(modelStatus()));
 app.get('/api/session',async(req,res)=>{
   try{
@@ -880,6 +947,28 @@ app.get('/api/search', auth, async (req, res) => {
       news: (data.news || []).map(x => ({ title: x.title, publisher: x.publisher, link: x.link, published: x.providerPublishTime }))
     });
   } catch (error) { res.status(502).json({ error: '暂时无法获取搜索数据', detail: error.message }); }
+});
+
+app.get('/api/volume-screen/latest',auth,async(req,res)=>{
+  try{res.json({result:await latestVolumeScreen(req.user.id)})}
+  catch(error){res.status(500).json({error:'暂时无法读取上次筛选结果',detail:error.message})}
+});
+
+app.post('/api/volume-screen',auth,async(req,res)=>{
+  const jobId=crypto.randomUUID(),userId=String(req.user.id),limit=Math.max(60,Math.min(300,Number(req.body.limit)||160));
+  volumeScreenJobs.set(jobId,{id:jobId,userId,status:'running',createdAt:new Date().toISOString()});
+  runVolumeScreen(req.user.id,limit).then(result=>{
+    volumeScreenJobs.set(jobId,{id:jobId,userId,status:'done',createdAt:new Date().toISOString(),result});
+  }).catch(error=>{
+    volumeScreenJobs.set(jobId,{id:jobId,userId,status:'failed',createdAt:new Date().toISOString(),error:error.message||'筛选失败'});
+  });
+  res.status(202).json({jobId});
+});
+
+app.get('/api/volume-screen/jobs/:id',auth,(req,res)=>{
+  const job=volumeScreenJobs.get(req.params.id);
+  if(!job||job.userId!==String(req.user.id))return res.status(404).json({error:'没有找到这次筛选任务'});
+  res.json(job);
 });
 
 app.get('/api/stock/:symbol', auth, async (req, res) => {
