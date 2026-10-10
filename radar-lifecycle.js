@@ -52,9 +52,9 @@ export function mergeOpportunityLifecycle(previous = [], report, now = new Date(
     // 已锁定事件日期后，保留期固定为“事件+5天”；不能因后来滚动到新窗口而被无限续期。
     const priorEventUntil = prior?.eventDate ? addDays(prior.eventDate, 5) : null;
     const currentUntil = retention.eventDate ? retention.validUntil : (priorEventUntil || retention.validUntil);
-    const validUntil = prior?.validUntil && prior.validUntil > currentUntil ? prior.validUntil : currentUntil;
+    const validUntil = prior?.validUntil || currentUntil;
     entries.push({
-      symbol: idea.symbol,
+      symbol: idea.symbol,researchId:idea.researchId||prior?.researchId||null,originalIdea:prior?.originalIdea||prior?.idea||idea,
       status: terminalStatuses.has(status) ? '跟踪中' : status,
       position: prior?.position || nextPosition++,
       firstSeenAt: prior?.firstSeenAt || nowIso,

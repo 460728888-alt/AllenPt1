@@ -1,3 +1,5 @@
+import {probabilityEligibility} from './probability-contract.js';
+import {assertWindow} from './data-contract.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -185,6 +187,8 @@ export function rankIdeas(ideas = [], days = 20) {
   const status = modelStatus();
   const horizonActive = status.horizons.find(item => item.days === Number(days))?.active;
   if (!horizonActive || !entry?.model || ideas.length < 2) return { status, items:ideas.map(idea => ({...idea,modelRanking:null})) };
+  const ready=ideas.filter(idea=>{try{assertWindow(idea.history,60);return idea.data?.state==='ok'}catch{return false}});
+  if(ready.length!==ideas.length)return {status:{...status,active:false,message:'候选数据不完整，暂停模型排序'},items:ideas.map(idea=>({...idea,modelRanking:null}))};
   const scored = ideas.map(idea => {
     const features = rankingFeatures(idea);
     const rankerRaw = rawPrediction(entry.model, features, bundle.features || RANKING_FEATURES);
@@ -205,13 +209,13 @@ export function rankIdeas(ideas = [], days = 20) {
     scored.forEach(item => {
       const raw = weight * rankPct.get(item) + (1 - weight) * winPct.get(item);
       item.modelRanking.rawScore = raw;
-      item.modelRanking.probability = calibratedProbability(raw, entry.calibration);
+      item.modelRanking.probability = probabilityEligibility(calibratedProbability(raw, entry.calibration),entry.probabilityContract).value;
       item.modelRanking.ensemble = {rankWeight:weight,coverage:numberOr(entry.coverage, .1)};
     });
   } else {
     scored.forEach(item => {
       item.modelRanking.rawScore = item.modelRanking.rankerRaw;
-      item.modelRanking.probability = calibratedProbability(item.modelRanking.rankerRaw, entry.calibration);
+      item.modelRanking.probability = probabilityEligibility(calibratedProbability(item.modelRanking.rankerRaw, entry.calibration),entry.probabilityContract).value;
     });
   }
   scored.sort((a,b) => b.modelRanking.rawScore - a.modelRanking.rawScore);

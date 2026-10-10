@@ -3,13 +3,23 @@
   "version": "1.24.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check app.js && node --check ranking-model.js && node --check forecast-client.js && node --check radar-lifecycle.js && node --check volume-structure.js && node --check volume-screen.js && node --test forecast-client.test.js ranking-model.test.js opportunity.test.js radar-lifecycle.test.js radar-v2.test.js radar-ui.test.js volume-structure.test.js volume-structure-ui.test.js volume-screen.test.js volume-screen-ui.test.js"
+    "check": "node --check server.js && node --check app.js && node --check radar-api.js && node --check research-store.js && node --test *.test.js",
+    "test:postgres": "node tests/postgres-integration.mjs && node tests/postgres-http.mjs",
+    "build:calendar": "node scripts/build-market-calendar.mjs",
+    "test:browser": "node tests/browser-integration.mjs",
+    "test:api": "node tests/api-integration.mjs",
+    "compare:levels": "node tests/compare-levels.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
     "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.0"
   }
 }

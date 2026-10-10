@@ -1,3 +1,10 @@
+import {createResearchStore} from './research-store.js';
+import fs from 'node:fs';
+import {loadMarketCalendar} from './market-calendar.js';
+import {finiteNumber,dataError,normalizeDailyChart,failureOf} from './data-contract.js';
+import {priceLevels,tradePlanFromLevels,SCREEN_STRATEGY} from './price-levels.js';
+import {guardForecast,probabilityEligibility} from './probability-contract.js';
+import {scanVolumeStocks} from './volume-scan.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -48,7 +55,11 @@ const memorySignalSnapshots = [];
 const memoryUserStates = new Map();
 const memoryAlerts = [];
 const aiUsage = new Map();
-const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5 }) : null;
+const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5, connectionTimeoutMillis:5000 }) : null;
+// Idle clients can disconnect outside an HTTP request; keep the process alive so
+// requests can return an explicit failure and the pool can reconnect after recovery.
+pool?.on('error',error=>console.error('Database idle connection failed',error.code||error.message));
+const researchStore=createResearchStore(pool,{enabled:process.env.RESEARCH_HISTORY_ENABLED==='true'});
 const CN_NAMES = {
   '601138.SS':'工业富联','000977.SZ':'浪潮信息','688981.SS':'中芯国际','300750.SZ':'宁德时代','0700.HK':'腾讯控股',
   '600519.SS':'贵州茅台','000001.SZ':'平安银行','000858.SZ':'五粮液','002594.SZ':'比亚迪','600036.SS':'招商银行',
@@ -207,50 +218,18 @@ function normalizeSymbol(raw = '') {
 }
 
 async function yahooJson(url) {
-  const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 AllenStock/1.0' } });
+  const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 AllenStock/1.0' },signal:AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`market data ${response.status}`);
   return response.json();
 }
 
-const finiteNumber = value => Number.isFinite(Number(value)) ? Number(value) : null;
+function marketCalendar() {
+  return loadMarketCalendar();
+}
 const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, value));
 const price2 = value => Number(Number(value).toFixed(2));
 
-function buildTradePlan(stock, preferences = {}) {
-  const t=stock.technical,price=stock.price;
-  const horizon=['短期','中期','长期'].includes(preferences.horizon)?preferences.horizon:'中期';
-  const risk=['低','中','高'].includes(preferences.risk)?preferences.risk:'中';
-  const cost=finiteNumber(preferences.cost),qty=Math.max(0,Math.floor(finiteNumber(preferences.qty)||0));
-  const supports=[t.low20,t.ma60,t.ma20].filter(value=>Number.isFinite(value)&&value<=price);
-  const support=supports.length?Math.max(...supports):Math.min(t.low20,t.ma20,price);
-  const dailyMove=clamp(t.volatility20||2,0.8,6);
-  const horizonFactor=horizon==='短期'?.85:horizon==='长期'?1.35:1;
-  const riskFactor=risk==='低'?.82:risk==='高'?1.22:1;
-  const stopPct=clamp(dailyMove*1.65*horizonFactor*riskFactor,risk==='低'?2:2.8,risk==='高'?9:7);
-  const entryHalfPct=clamp(dailyMove*.28,.35,1.4);
-  const entryLow=price2(support*(1-entryHalfPct/100));
-  const entryHigh=price2(support*(1+entryHalfPct/100));
-  const entryMid=(entryLow+entryHigh)/2;
-  const structuralStop=entryMid*(1-stopPct/100);
-  const trailingCandidate=t.ma20*(1-clamp(dailyMove*.55*horizonFactor*riskFactor,.6,3.8)/100);
-  let defense=cost&&price>cost?Math.max(structuralStop,trailingCandidate):structuralStop;
-  defense=Math.min(defense,price*.99);
-  defense=price2(defense);
-  const basis=cost||entryMid,riskPerShare=cost?Math.max(.01,cost*stopPct/100):Math.max(.01,basis-defense);
-  const target1=price2(basis+riskPerShare*1.5),target2=price2(basis+riskPerShare*2.5);
-  const breakout=price2(t.high20*1.003);
-  const inEntry=price>=entryLow&&price<=entryHigh,target1Reached=price>=target1,target2Reached=price>=target2;
-  const status=price<=defense?'防守价已触发，优先重新评估':cost&&target2Reached?'已达到第二止盈观察区':cost&&target1Reached?'已达到第一止盈观察区':cost?'持有并观察价格条件':inEntry&&t.score>=55?'进入回调关注区间':price>=breakout&&t.score>=60?'突破后等待收盘确认':'等待价格条件';
-  return {
-    horizon,risk,status,dataThrough:stock.marketTime?new Date(stock.marketTime*1000).toISOString().slice(0,10):null,
-    currentPrice:price,support:price2(support),pullbackEntry:{low:entryLow,high:entryHigh},breakoutPrice:breakout,
-    defensePrice:defense,target1,target2,riskReward1:Number(((target1-basis)/riskPerShare).toFixed(1)),riskReward2:Number(((target2-basis)/riskPerShare).toFixed(1)),
-    cost,qty,maxEstimatedLoss:cost&&qty?price2(Math.max(0,(cost-defense)*qty)):null,
-    estimatedOutcomeAtDefense:cost&&qty?price2((defense-cost)*qty):null,
-    conditions:{trendConfirmed:t.ma5>t.ma20,aboveMediumAverage:price>t.ma20,nearPullback:inEntry,breakoutConfirmed:price>=breakout,defenseTriggered:price<=defense,target1Reached,target2Reached},
-    basis:'根据最近20日价格区间、5/20/60日平均价格、20日波动程度和个人持仓成本计算；每天随行情更新。'
-  };
-}
+const buildTradePlan=tradePlanFromLevels;
 
 function marketSymbol(code) {
   if (/^(?:600|601|603|605|688|689)/.test(code)) return `${code}.SS`;
@@ -267,7 +246,7 @@ async function getLiquidAMarketSnapshot() {
   const pageCount=reportedTotal?Math.min(MARKET_SCAN_PAGES,Math.ceil(reportedTotal/MARKET_PAGE_SIZE)):12;
   const pages = await mapLimit(Array.from({length:pageCount}, (_, index) => index),4,index=>
     fetch(`${base}${index + 1}`, { headers:{Referer:'https://finance.sina.com.cn/','User-Agent':'Mozilla/5.0 AllenStock/1.2'}, signal:AbortSignal.timeout(25000) })
-      .then(response => { if (!response.ok) throw new Error(`market snapshot ${response.status}`); return response.json(); })
+      .then(response => { if (!response.ok) throw new Error(`market snapshot ${response.status}`); return response.json().then(data=>{if(!Array.isArray(data))throw dataError('行情分页格式异常','request_failed','format_error');return data}); })
   );
   const successful = pages.filter(item => item.ok).map(item => item.value);
   const rows = successful.flatMap(data => Array.isArray(data) ? data : []).map(item => {
@@ -280,9 +259,10 @@ async function getLiquidAMarketSnapshot() {
       floatMarketCap:finiteNumber(item.nmc) === null ? null : finiteNumber(item.nmc) * 10000, pb:finiteNumber(item.pb)
     };
   }).filter(item => item.symbol && item.price >= 2 && item.amount >= 2e7 && item.marketCap >= 1e9 && !/(?:\*?ST|退市)/i.test(item.name));
-  if (rows.length < 300) throw new Error('全市场行情源暂时返回不足');
+  if(!successful.length)throw dataError('全部行情分页请求失败，无法完成判断','request_failed','all_pages_failed');
+  if(!rows.length)throw dataError('行情分页未返回可用股票，无法完成判断','insufficient','empty_universe');
   const total = reportedTotal || rows.length;
-  marketSnapshotCache = {time:Date.now(), rows, total, pages:successful.length};
+  marketSnapshotCache = {time:Date.now(), rows, total, pages:successful.length,pageCoverage:{requested:pages.length,returned:successful.length,failed:pages.length-successful.length,failures:pages.filter(p=>!p.ok).map(p=>p.error)}};
   return marketSnapshotCache;
 }
 
@@ -352,7 +332,7 @@ async function resolveChineseStockName(symbol) {
 async function getStockData(rawSymbol, options = {}) {
   const symbol = normalizeSymbol(rawSymbol);
   if (!symbol) throw new Error('股票代码无效');
-  const chartPromise = yahooJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=6mo&interval=1d&events=div%2Csplits`);
+  const chartPromise = yahooJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d&events=div%2Csplits`);
   const searchPromise = options.withNews === false
     ? Promise.resolve({ news: [] })
     : yahooJson(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&quotesCount=1&newsCount=8`).catch(() => ({ news: [] }));
@@ -361,25 +341,13 @@ async function getStockData(rawSymbol, options = {}) {
   const result = chart.chart?.result?.[0];
   if (!result) throw new Error('symbol not found');
   const meta = result.meta || {};
-  const timestamps = result.timestamp || [];
-  const quote = result.indicators?.quote?.[0] || {};
-  const chartRows = timestamps.map((time, index) => ({
-    time,
-    close:Number(quote.close?.[index]),
-    high:Number(quote.high?.[index]),
-    low:Number(quote.low?.[index]),
-    volume:Number(quote.volume?.[index])
-  })).filter(row => Number.isFinite(row.close) && row.close > 0).map(row => ({
-    ...row,
-    high:Number.isFinite(row.high) && row.high > 0 ? row.high : row.close,
-    low:Number.isFinite(row.low) && row.low > 0 ? row.low : row.close,
-    volume:Number.isFinite(row.volume) && row.volume >= 0 ? row.volume : 0
-  }));
+  const normalized=normalizeDailyChart(result,{symbol,calendar:marketCalendar(),minimum:options.minimum||60});
+  const chartRows=normalized.rows;
   const closes = chartRows.map(row => row.close);
   const volumes = chartRows.map(row => row.volume);
-  const price = meta.regularMarketPrice ?? closes.at(-1);
-  const previous = closes.at(-2) ?? meta.previousClose ?? meta.chartPreviousClose;
-  const changePct = previous ? ((price - previous) / previous) * 100 : null;
+  const price = closes.at(-1)??null;
+  const previous = finiteNumber(closes.at(-2) ?? meta.previousClose ?? meta.chartPreviousClose);
+  const changePct = Number.isFinite(price)&&price>0&&Number.isFinite(previous)&&previous>0 ? ((price - previous) / previous) * 100 : null;
   const ma5 = average(closes, 5), ma20 = average(closes, 20), ma60 = average(closes, 60);
   const high20 = Math.max(...chartRows.slice(-20).map(row => row.high));
   const low20 = Math.min(...chartRows.slice(-20).map(row => row.low));
@@ -392,12 +360,15 @@ async function getStockData(rawSymbol, options = {}) {
     symbol, code:symbol.slice(0,6), name: chineseName || CN_NAMES[symbol] || meta.longName || meta.shortName || symbol,
     currency: meta.currency || '', exchange: meta.exchangeName || '', price, previous, changePct,
     marketTime: meta.regularMarketTime || null,
-    technical: { ma5, ma20, ma60, high20, low20, volume: volumes.at(-1) || null, volatility20, score },
+    technical: { ma5, ma20, ma60, high20, low20, volume: volumes.at(-1) ?? null, volatility20, score },
     // Preserve aligned OHLCV rows. The ranking model must receive the same
     // price/volume fields that were used to build its training features.
-    history: chartRows.slice(-120),
+    history: chartRows,
+    data:normalized.data,levels:normalized.data.state==='ok'?priceLevels(chartRows,{tick:/\.(SS|SZ)$/.test(symbol)?.01:null}):null,
+    liveQuote:{price:finiteNumber(meta.regularMarketPrice),marketTime:meta.regularMarketTime||null,priceBasis:'raw_realtime'},
     news: (search.news || []).map(x => ({ title: x.title, publisher: x.publisher, link: x.link, published: x.providerPublishTime }))
   };
+  if(normalized.data.state!=='ok')stock.technical=Object.fromEntries(Object.keys(stock.technical).map(k=>[k,null]));
   stock.tradePlan=buildTradePlan(stock);
   return stock;
 }
@@ -497,60 +468,33 @@ async function getUserState(userId) {
 }
 
 async function getVolumeTracks(userId){
-  if(pool)return (await pool.query(`SELECT symbol,name,status,result_json AS result,first_seen_at AS "firstSeenAt",last_seen_at AS "lastSeenAt",expires_at AS "expiresAt",active FROM volume_screen_tracks WHERE user_id=$1 AND expires_at>NOW() ORDER BY first_seen_at`,[userId])).rows;
-  return [...memoryVolumeTracks.values()].filter(item=>item.userId===String(userId)&&new Date(item.expiresAt)>new Date());
+  if(!pool)throw Error('跟踪记录暂不可读取：持久存储未启用');
+  if(process.env.RESEARCH_HISTORY_ENABLED==='true') {
+    const items=await researchStore.list(userId,{channel:'volume'});
+    return items.filter(x=>x.strategyVersion===SCREEN_STRATEGY.version&&!['invalidated','closed','expired','逻辑失效','完成复盘'].includes(x.status));
+  }
+  return (await pool.query(`SELECT symbol,name,status,result_json AS result,first_seen_at AS "firstSeenAt",true AS legacy FROM volume_screen_tracks WHERE user_id=$1 AND active=TRUE ORDER BY first_seen_at`,[userId])).rows;
 }
-
 async function saveVolumeScreen(userId,result){
-  if(pool){
-    await pool.query('INSERT INTO volume_screen_runs(id,user_id,result_json) VALUES($1,$2,$3)',[result.id,userId,JSON.stringify(result)]);
-    for(const item of result.items){
-      await pool.query(`INSERT INTO volume_screen_tracks(user_id,symbol,name,status,result_json,expires_at,active) VALUES($1,$2,$3,$4,$5,NOW()+INTERVAL '30 days',$6) ON CONFLICT(user_id,symbol) DO UPDATE SET name=EXCLUDED.name,status=EXCLUDED.status,result_json=EXCLUDED.result_json,last_seen_at=NOW(),expires_at=EXCLUDED.expires_at,active=EXCLUDED.active`,[userId,item.symbol,item.name,item.status,JSON.stringify(item),item.tone!=='red']);
-    }
-    return;
-  }
-  memoryVolumeScreenRuns.unshift({userId:String(userId),...result});
-  if(memoryVolumeScreenRuns.length>100)memoryVolumeScreenRuns.length=100;
-  for(const item of result.items){
-    const key=`${userId}:${item.symbol}`,old=memoryVolumeTracks.get(key);
-    memoryVolumeTracks.set(key,{userId:String(userId),symbol:item.symbol,name:item.name,status:item.status,result:item,firstSeenAt:old?.firstSeenAt||result.createdAt,lastSeenAt:result.createdAt,expiresAt:new Date(Date.now()+30*864e5).toISOString(),active:item.tone!=='red'});
-  }
+  const saved=await researchStore.saveVolumeScan(userId,result);
+  Object.assign(result,saved);
 }
-
 async function latestVolumeScreen(userId){
-  if(pool)return (await pool.query(`SELECT result_json AS result FROM volume_screen_runs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`,[userId])).rows[0]?.result||null;
-  return memoryVolumeScreenRuns.find(item=>item.userId===String(userId))||null;
+  if(!pool)throw Error('记录暂不可读取：持久存储未启用');
+  const row=(await pool.query('SELECT result_json AS result FROM volume_screen_runs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1',[userId])).rows[0];
+  return row?{...row.result,legacy:!row.result.strategy}:null;
 }
 
 async function runVolumeScreen(userId,limit=1200,onProgress=()=>{}){
-  const snapshot=await getLiquidAMarketSnapshot(),tracked=await getVolumeTracks(userId);
-  const prior=new Map(tracked.map(item=>[item.symbol,item]));
+  const snapshot=await getLiquidAMarketSnapshot();
+  let tracked=[],historyRead={state:'ok'};
+  try{tracked=await getVolumeTracks(userId)}catch(error){historyRead={state:'unavailable',message:'记录暂不可读取',reason:error.message}}
   const liquid=[...snapshot.rows].sort((a,b)=>(b.amount||0)-(a.amount||0)).slice(0,limit);
-  const source=[...new Map([...tracked.map(item=>({symbol:item.symbol,name:item.name,amount:Infinity})),...liquid].map(item=>[item.symbol,item])).values()];
-  const checked=[],batchSize=120;
-  onProgress({checked:0,total:source.length,found:0,failed:0});
-  for(let start=0;start<source.length;start+=batchSize){
-    const batch=source.slice(start,start+batchSize);
-    const batchResults=await mapLimit(batch,8,async item=>{
-      const stock=await getStockData(item.symbol,{withNews:false});
-      const structure=analyzeVolumeStructure(stock.history),profile=buildVolumeScreenProfile(stock.history,structure);
-      const label=classifyVolumeCandidate(structure,profile,{wasTracked:prior.has(stock.symbol)});
-      if(!label)return null;
-      return {
-        symbol:stock.symbol,code:stock.code,name:stock.name,price:Number(stock.price.toFixed(2)),
-        dataThrough:stock.history.at(-1)?.date||null,...label,
-        confirmPrice:structure.prices.confirm,giveUpPrice:structure.prices.invalidation,targetPrice:profile.priorHigh,
-        riskReward:profile.riskReward,stage:structure.stage,volumeRatio:structure.volume.ratio,
-        pullbackPct:profile.pullbackPct,firstSeenAt:prior.get(stock.symbol)?.firstSeenAt||new Date().toISOString()
-      };
-    });
-    checked.push(...batchResults);
-    onProgress({checked:checked.length,total:source.length,found:checked.filter(item=>item.ok&&item.value).length,failed:checked.filter(item=>!item.ok).length});
-    if(start+batchSize<source.length)await new Promise(resolve=>setTimeout(resolve,250));
-  }
-  const items=checked.filter(item=>item.ok&&item.value).map(item=>item.value).sort((a,b)=>a.rank-b.rank||(b.riskReward||0)-(a.riskReward||0)).slice(0,60);
-  const result={id:crypto.randomUUID(),createdAt:new Date().toISOString(),coverage:{market:snapshot.rows.length,checked:source.length,usable:checked.filter(item=>item.ok).length,failed:checked.filter(item=>!item.ok).length},items};
-  await saveVolumeScreen(userId,result);
+  const source=[...new Map([...liquid,...tracked.map(item=>({symbol:item.symbol,name:item.name}))].map(item=>[item.symbol,item])).values()];
+  const result={id:crypto.randomUUID(),createdAt:new Date().toISOString(),...await scanVolumeStocks(source,{quote:symbol=>getStockData(symbol,{withNews:false}),tracked,onProgress}),historyRead};
+  result.retained=tracked.filter(t=>!result.observations.some(o=>o.symbol===t.symbol)).map(t=>({...t,currentState:'unverified'}));
+  Object.assign(result.coverage,{market:snapshot.rows.length,marketPages:snapshot.pageCoverage});
+  try{await saveVolumeScreen(userId,result);result.storage={state:'saved',durable:true}}catch(error){result.storage={state:pool?'failed':'disabled',durable:false,message:pool?'保存失败':'持久保存未启用',reason:error.message}}
   return result;
 }
 
@@ -620,26 +564,8 @@ function percentile(values, fraction) {
 }
 
 async function getDailySeries(rawSymbol) {
-  const symbol = normalizeSymbol(rawSymbol);
-  if (!symbol) throw new Error('股票代码无效');
-  const chart = await yahooJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1d&events=div%2Csplits`);
-  const result = chart.chart?.result?.[0];
-  if (!result) throw new Error('没有找到该股票');
-  const quote = result.indicators?.quote?.[0] || {};
-  const adjusted = result.indicators?.adjclose?.[0]?.adjclose || quote.close || [];
-  const rows = (result.timestamp || []).map((time, index) => {
-    const adjustedClose=finiteNumber(adjusted[index]), rawClose=finiteNumber(quote.close?.[index]);
-    const close=adjustedClose>0?adjustedClose:rawClose>0?rawClose:null;
-    const factor=rawClose>0&&close>0?close/rawClose:1;
-    return {time,close,
-      open:finiteNumber(quote.open?.[index])*factor,
-      high:finiteNumber(quote.high?.[index])*factor,
-      low:finiteNumber(quote.low?.[index])*factor,
-      volume:finiteNumber(quote.volume?.[index])};
-  }).filter(row => Number.isFinite(row.close) && row.close > 0);
-  if (rows.length < 160) throw new Error('有效历史数据不足，暂时无法计算趋势概率');
-  const meta = result.meta || {};
-  return { symbol, name:CN_NAMES[symbol] || meta.longName || meta.shortName || symbol, rows };
+  const stock=await getStockData(rawSymbol,{withNews:false});
+  return {symbol:stock.symbol,name:stock.name,rows:stock.history,data:stock.data,levels:stock.levels};
 }
 
 function signalAt(rows, benchmarkMap, index, horizon) {
@@ -721,47 +647,33 @@ function analyzeHorizon(rows, benchmarkMap, horizon) {
 }
 
 async function buildPrediction(rawSymbol) {
-  const [stock,benchmark] = await Promise.all([getDailySeries(rawSymbol),getDailySeries('000001.SS')]);
-  const benchmarkMap = new Map(benchmark.rows.map(row=>[row.time,row.close]));
-  const commonTimes = stock.rows.map(row=>row.time).filter(time=>benchmarkMap.has(time));
-  const latestCommonTime = commonTimes.at(-1);
-  if (!latestCommonTime) throw new Error('股票与上证综合指数没有可比较的交易日');
-  const comparableRows = stock.rows.filter(row=>row.time<=latestCommonTime);
-  const last = comparableRows.at(-1);
-  const benchmarkRows=benchmark.rows.filter(row=>row.time<=latestCommonTime),benchmarkIndex=benchmarkRows.length-1;
-  const benchmarkMa20=meanAt(benchmarkRows,benchmarkIndex,20),benchmarkMa60=meanAt(benchmarkRows,benchmarkIndex,60);
-  const benchmarkMomentum20=percentChange(benchmarkRows[benchmarkIndex-20]?.close,benchmarkRows[benchmarkIndex]?.close);
-  const marketRegime=benchmarkMa20>benchmarkMa60&&benchmarkMomentum20>0?'上升环境':benchmarkMa20<benchmarkMa60&&benchmarkMomentum20<0?'偏弱环境':'震荡环境';
-  const ruleHorizons=[5,20,60].map(days=>analyzeHorizon(comparableRows,benchmarkMap,days));
-  const pretrained=await foundationForecast(comparableRows,[5,20,60]);
-  const foundationByDays=new Map((pretrained.horizons||[]).map(item=>[Number(item.days),item]));
-  const horizons=ruleHorizons.map(rule=>{
-    const foundation=foundationByDays.get(rule.days)||null;
-    return {...rule,foundation,committee:committeeDecision(rule,foundation)};
-  });
-  const confirmed=horizons.filter(item=>item.committee.agreement);
-  return {
-    symbol:stock.symbol, code:stock.symbol.slice(0,6), name:stock.name, currentPrice:last.close,
-    dataThrough:new Date(last.time*1000).toISOString().slice(0,10), benchmark:'上证综合指数', historyDays:comparableRows.length,
-    market:{regime:marketRegime,twentyDayAverage:benchmarkMa20,sixtyDayAverage:benchmarkMa60,twentyDayMomentum:benchmarkMomentum20},
-    horizons,
-    volumeStructure:analyzeVolumeStructure(comparableRows),
-    modelCommittee:{
-      pretrainedAvailable:Boolean(pretrained.available),engine:pretrained.engine||null,model:pretrained.model||null,
-      models:pretrained.models||[],reason:pretrained.reason||null,error:pretrained.error||null,
-      agreementCount:confirmed.length,total:3,
-      status:pretrained.available?(confirmed.length?`${confirmed.length}/3个周期形成双模型共振`:'各模型尚未形成共振'):'预训练服务不可用，已安全回退到历史统计模型',
-      lightgbm:modelStatus().active?'已验证并参与机会排序':'未训练，不参与本次预测'
-    },
-    methodology:'模型委员会分别展示Amazon Chronos-Bolt预训练价格分布与最近两年历史条件统计；只有方向一致才标记共振。历史统计收益扣除0.2%模拟摩擦成本。DeepSeek负责解释事件证据，不直接修改数值预测。'
-  };
+  const stock=await getDailySeries(rawSymbol),last=stock.rows.at(-1);
+  const result={symbol:stock.symbol,code:stock.symbol.slice(0,6),name:stock.name,currentPrice:last?.close??null,
+    data:stock.data,dataThrough:stock.data.dataThrough,levels:stock.levels,strategy:SCREEN_STRATEGY,benchmark:'上证综合指数',historyDays:stock.rows.length,
+    volumeStructure:null,horizons:[],market:null,modelCommittee:{status:'未经验证的概率不显示，不判共振',agreementCount:0,total:3,lightgbm:modelStatus().message},
+    methodology:'结构参考与概率目标独立。上涨、跑赢基准、先止盈后止损不可混用；未提供可追溯验证依据的概率与行动结论暂停。'};
+  if(stock.data.state!=='ok')return result;
+  result.volumeStructure=analyzeVolumeStructure(stock.rows);
+  try {
+    const benchmark=await getDailySeries('000001.SS');
+    if(benchmark.data.state!=='ok'||benchmark.data.dataThrough!==stock.data.dataThrough)throw Error('基准数据不可用或截止日期不一致');
+    const benchmarkMap=new Map(benchmark.rows.map(r=>[r.date,r.close]));
+    const keyed=new Map(stock.rows.map(r=>[r.time,benchmarkMap.get(r.date)]));
+    result.horizons=[5,20,60].map(days=>{try{return guardForecast(analyzeHorizon(stock.rows,keyed,days))}catch(error){return {days,probabilityStatus:'unverified',reason:error.message}}});
+    const pretrained=await foundationForecast(stock.rows,[5,20,60]);
+    result.horizons=result.horizons.map(rule=>{const foundation=pretrained.horizons?.find(h=>Number(h.days)===rule.days)||null;return {...rule,foundation,committee:committeeDecision(rule,foundation)}});
+    result.modelCommittee.pretrainedAvailable=!!pretrained.available;
+    result.modelCommittee.reason=pretrained.reason||null;
+  }catch(error){result.modelCommittee.reason=error.message;result.horizons=[5,20,60].map(days=>({days,probabilityStatus:'unverified',reason:error.message}))}
+  return result;
 }
 
 async function saveSignalSnapshots(userId, items) {
+  if(!pool)throw Error('评分记录保存失败：持久存储未启用');
   const today=new Date().toISOString().slice(0,10),changes=[];
   for(const raw of items.slice(0,20)){
     const symbol=normalizeSymbol(raw.symbol),name=String(raw.name||symbol).slice(0,120),score=Math.round(clamp(Number(raw.score)||0)),status=String(raw.status||'待判断').slice(0,40),price=finiteNumber(raw.price);
-    if(!symbol)continue;
+    if(!symbol||finiteNumber(raw.score)===null)continue;
     let previous=null;
     if(pool){
       previous=(await pool.query(`SELECT score,status,price,data_date AS "dataDate" FROM signal_snapshots WHERE user_id=$1 AND symbol=$2 AND data_date<$3 ORDER BY data_date DESC LIMIT 1`,[userId,symbol,today])).rows[0]||null;
@@ -777,6 +689,7 @@ async function saveSignalSnapshots(userId, items) {
 }
 
 async function predictionScorecard(userId){
+  if(!pool)throw Error('记录暂不可读取：持久存储未启用');
   const stored=pool?(await pool.query(`SELECT symbol,name,result_json AS result,created_at AS "createdAt" FROM prediction_runs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 160`,[userId])).rows:memoryPredictions.filter(x=>x.userId===String(userId)).slice(0,160);
   const seen=new Set(),runs=[];
   for(const item of stored){const result=item.result||item.result_json||{},key=`${item.symbol}:${result.dataThrough}`;if(!result.dataThrough||seen.has(key))continue;seen.add(key);runs.push({...item,result})}
@@ -787,6 +700,7 @@ async function predictionScorecard(userId){
     const baseIndex=series.rows.findIndex(row=>new Date(row.time*1000).toISOString().slice(0,10)===run.result.dataThrough);
     if(baseIndex<0)continue;
     for(const forecast of run.result.horizons||[]){
+      if(!probabilityEligibility(forecast.outperformProbability,forecast.probabilityContracts?.outperformProbability).eligible)continue;
       const future=series.rows[baseIndex+forecast.days],base=series.rows[baseIndex];
       if(!future){evaluations.push({days:forecast.days,pending:true});continue}
       const benchmarkStart=benchmarkMap.get(base.time),benchmarkEnd=benchmarkMap.get(future.time);if(!Number.isFinite(benchmarkStart)||!Number.isFinite(benchmarkEnd))continue;
@@ -860,16 +774,17 @@ app.post('/api/monitor',auth,async(req,res)=>{
   for(const result of checked){
     if(result.status!=='fulfilled')continue;
     const stock=result.value,t=stock.technical;
+    if(stock.data?.state!=='ok'||!Number.isFinite(t.score)||!(stock.price>0))continue;
     if(t.score<45)await addUserAlert(req.user.id,{key:`risk:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}趋势风险上升`,content:`当前技术条件评分为${t.score}分，短期走势偏弱。请检查是否跌破关键平均价格，并重新核对原投资逻辑。`,level:'风险'});
     if(stock.price>=t.high20*.99)await addUserAlert(req.user.id,{key:`high:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}接近近期高位`,content:`当前价格接近最近20个交易日高位，追高风险可能上升。建议结合成交量、估值和持仓计划判断。`,level:'提醒'});
     const holding=portfolio.find(item=>normalizeSymbol(item.symbol)===stock.symbol);
     const plan=buildTradePlan(stock,{cost:holding?.buy,qty:holding?.qty,horizon:holding?.cycle||'中期',risk:holding?.riskPreference||'中'});
-    if(holding&&stock.price<=plan.defensePrice)await addUserAlert(req.user.id,{key:`defense:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}已触及防守价格`,content:`当前参考价${price2(stock.price)}元，已达到或低于计划防守价${plan.defensePrice}元。请核对行情、公告和原投资逻辑后决定是否降低风险。`,level:'风险'});
-    if(holding&&stock.price>=plan.target2)await addUserAlert(req.user.id,{key:`target2:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}已达到第二止盈观察区`,content:`当前参考价${price2(stock.price)}元，已达到第二止盈参考价${plan.target2}元。可按自己的计划检查是否分批锁定收益。`,level:'提醒'});
-    else if(holding&&stock.price>=plan.target1)await addUserAlert(req.user.id,{key:`target1:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}已达到第一止盈观察区`,content:`当前参考价${price2(stock.price)}元，已达到第一止盈参考价${plan.target1}元。请结合趋势和仓位计划判断。`,level:'提醒'});
+    if(holding&&Number.isFinite(plan.defensePrice)&&stock.price<=plan.defensePrice)await addUserAlert(req.user.id,{key:`defense:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}已触及防守价格`,content:`当前参考价${price2(stock.price)}元，已达到或低于计划防守价${plan.defensePrice}元。请核对行情、公告和原投资逻辑后决定是否降低风险。`,level:'风险'});
+    if(holding&&Number.isFinite(plan.target2)&&stock.price>=plan.target2)await addUserAlert(req.user.id,{key:`target2:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}已达到第二止盈观察区`,content:`当前参考价${price2(stock.price)}元，已达到第二止盈参考价${plan.target2}元。可按自己的计划检查是否分批锁定收益。`,level:'提醒'});
+    else if(holding&&Number.isFinite(plan.target1)&&stock.price>=plan.target1)await addUserAlert(req.user.id,{key:`target1:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}已达到第一止盈观察区`,content:`当前参考价${price2(stock.price)}元，已达到第一止盈参考价${plan.target1}元。请结合趋势和仓位计划判断。`,level:'提醒'});
     if(!holding&&plan.conditions.nearPullback&&t.score>=55)await addUserAlert(req.user.id,{key:`entry:${day}:${stock.symbol}`,symbol:stock.symbol,title:`${stock.name}进入回调关注区间`,content:`当前参考价${price2(stock.price)}元，回调关注区间为${plan.pullbackEntry.low}—${plan.pullbackEntry.high}元。请先确认趋势、财务和公告条件，不代表必须买入。`,level:'提醒'});
   }
-  res.json({ok:true,checked:checked.filter(item=>item.status==='fulfilled').length});
+  res.json({ok:true,requested:checked.length,returned:checked.filter(item=>item.status==='fulfilled').length,usable:checked.filter(item=>item.status==='fulfilled'&&item.value.data?.state==='ok').length,failures:checked.filter(item=>item.status==='rejected').map(item=>failureOf(item.reason))});
 });
 
 app.get('/api/admin/users',auth,admin,async(_req,res)=>{
@@ -892,20 +807,23 @@ app.patch('/api/admin/users/:id',auth,admin,async(req,res)=>{
   else return res.status(400).json({error:'操作无效'});res.json({ok:true});
 });
 app.get('/api/admin/backup',auth,admin,async(_req,res)=>{
-  const createdAt=new Date().toISOString();let backup;
-  if(pool){
-    const [users,states,announcements,reads,predictions,alerts,signals]=await Promise.all([
-      pool.query('SELECT id,username,display_name,role,active,created_at,last_login_at FROM users ORDER BY id'),
-      pool.query('SELECT user_id,data_json,updated_at FROM user_states ORDER BY user_id'),
-      pool.query('SELECT id,slug,title,content,level,active,created_at FROM announcements ORDER BY id'),
-      pool.query('SELECT announcement_id,user_id,read_at FROM announcement_reads ORDER BY user_id,announcement_id'),
-      pool.query('SELECT id,user_id,symbol,name,result_json,created_at FROM prediction_runs ORDER BY id'),
-      pool.query('SELECT id,user_id,alert_key,symbol,title,content,level,read_at,created_at FROM user_alerts ORDER BY id'),
-      pool.query('SELECT id,user_id,symbol,name,score,status,price,data_date,created_at FROM signal_snapshots ORDER BY id')
-    ]);
-    backup={version:'1.15.0',createdAt,users:users.rows,userStates:states.rows,announcements:announcements.rows,announcementReads:reads.rows,predictions:predictions.rows,alerts:alerts.rows,signalSnapshots:signals.rows};
-  }else backup={version:'1.15.0',createdAt,users:[...memoryUsers.values()].map(({password_hash,...u})=>u),userStates:[...memoryUserStates.entries()],announcements:memoryAnnouncements,announcementReads:[...memoryAnnouncementReads.entries()].map(([userId,ids])=>[userId,[...ids]]),predictions:memoryPredictions,alerts:memoryAlerts,signalSnapshots:memorySignalSnapshots};
-  res.setHeader('Content-Disposition',`attachment; filename="allen-stock-backup-${createdAt.slice(0,10)}.json"`);res.json(backup);
+  if(!pool)return res.status(503).json({error:'持久存储未启用，无法导出持久备份'});
+  const c=await pool.connect();
+  try {
+    await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const backup={version:'research-history-1',createdAt:new Date().toISOString(),tables:{},unavailable:[]};
+    const tables=['users','user_states','announcements','announcement_reads','prediction_runs','user_alerts','signal_snapshots','opportunity_reports','radar_journal','radar_lifecycle','volume_screen_runs','volume_screen_tracks','research_opportunities','research_events','research_episode_heads'];
+    for(const table of tables) {
+      const exists=(await c.query('SELECT to_regclass($1) AS name',[table])).rows[0].name;
+      if(!exists){backup.unavailable.push(table);continue}
+      const columns=table==='users'?'id,username,display_name,role,active,created_at,last_login_at':
+        ['research_opportunities','research_events'].includes(table)?'*,data_through::text AS data_through':'*';
+      backup.tables[table]=(await c.query(`SELECT ${columns} FROM ${table}`)).rows;
+    }
+    await c.query('COMMIT');
+    res.setHeader('Content-Disposition',`attachment; filename="allen-stock-backup-${backup.createdAt.slice(0,10)}.json"`);res.json(backup);
+  }catch(error){await c.query('ROLLBACK').catch(()=>{});res.status(503).json({error:'备份导出失败，未生成完整备份',detail:error.message})}
+  finally{c.release()}
 });
 
 app.get('/api/announcements',auth,async(req,res)=>{
@@ -1012,26 +930,15 @@ app.get('/api/research/:symbol',auth,async(req,res)=>{
 
 app.post('/api/prediction', auth, async (req,res) => {
   try {
-    const result = await buildPrediction(req.body.symbol);
-    let previous=null;
-    if(pool)previous=(await pool.query('SELECT result_json FROM prediction_runs WHERE user_id=$1 AND symbol=$2 ORDER BY created_at DESC LIMIT 1',[req.user.id,result.symbol])).rows[0]?.result_json||null;
-    else previous=memoryPredictions.find(item=>item.userId===String(req.user.id)&&item.symbol===result.symbol)?.result||null;
-    if(previous?.horizons){
-      const changes=result.horizons.map(current=>{const before=previous.horizons.find(item=>item.days===current.days);return before?{days:current.days,before:before.outperformProbability,now:current.outperformProbability,beforeDirection:before.direction,nowDirection:current.direction}:null}).filter(Boolean);
-      result.changes=changes;
-      const important=changes.find(item=>Math.abs(item.now-item.before)>=15||item.beforeDirection!==item.nowDirection);
-      if(important)await addUserAlert(req.user.id,{key:`prediction:${result.symbol}:${result.dataThrough}:${important.days}`,symbol:result.symbol,title:`${result.name}趋势概率发生变化`,content:`未来${important.days}个交易日跑赢市场基准的历史条件概率由${important.before}%变为${important.now}%，方向由“${important.beforeDirection}”变为“${important.nowDirection}”。请重新检查风险和持仓计划。`,level:'变化'});
-    }
-    if (pool) {
+    const result=await buildPrediction(req.body.symbol);
+    result.changes=[]; // No unsupported probability change alerts.
+    try{
+      if(!pool)throw Error('持久保存未启用');
       await pool.query('INSERT INTO prediction_runs(user_id,symbol,name,result_json) VALUES($1,$2,$3,$4)',[req.user.id,result.symbol,result.name,JSON.stringify(result)]);
-    } else {
-      memoryPredictions.unshift({userId:String(req.user.id),symbol:result.symbol,name:result.name,result,createdAt:new Date().toISOString()});
-      if (memoryPredictions.length > 200) memoryPredictions.length = 200;
-    }
+      result.storage={state:'saved',durable:true};
+    }catch(error){result.storage={state:pool?'failed':'disabled',durable:false,message:error.message}}
     res.json(result);
-  } catch (error) {
-    res.status(502).json({error:error.message || '趋势预测暂时不可用'});
-  }
+  }catch(error){res.status(502).json({error:error.message||'无法完成判断',data:failureOf(error)})}
 });
 
 app.get('/api/predictions/recent', auth, async (req,res) => {
@@ -1040,9 +947,9 @@ app.get('/api/predictions/recent', auth, async (req,res) => {
     const params=[req.user.id], filter=symbol?' AND symbol=$2':'';
     if(symbol)params.push(symbol);
     const rows=(await pool.query(`SELECT id,symbol,name,result_json AS result,created_at AS "createdAt" FROM prediction_runs WHERE user_id=$1${filter} ORDER BY created_at DESC LIMIT 8`,params)).rows;
-    return res.json({predictions:rows});
+    return res.json({predictions:rows.map(r=>({...r,legacy:true,result:{...r.result,horizons:(r.result.horizons||[]).map(guardForecast)}}))});
   }
-  res.json({predictions:memoryPredictions.filter(item=>item.userId===String(req.user.id)&&(!symbol||item.symbol===symbol)).slice(0,8)});
+  res.status(503).json({error:'记录暂不可读取：持久存储未启用',storage:{state:'disabled'}});
 });
 
 app.get('/api/predictions/scorecard',auth,async(req,res)=>{
@@ -1075,7 +982,7 @@ app.post('/api/ai/chat', auth, async (req,res) => {
 });
 
 registerRadar({app,auth,pool,market:getLiquidAMarketSnapshot,research:getResearchData,
- quote:symbol=>getStockData(symbol,{withNews:false}),publicJson,
+ quote:symbol=>getStockData(symbol,{withNews:false}),publicJson,researchStore,
  ranker:(ideas,days)=>rankIdeas(ideas,days),
  ai:AI_API_KEY?async(username,result)=>{
    const remaining=useAiQuota(username);if(remaining===false)throw Error('今日AI额度已用完');
@@ -1084,7 +991,22 @@ registerRadar({app,auth,pool,market:getLiquidAMarketSnapshot,research:getResearc
  }:null
 });
 
+app.get('/api/research-history',auth,async(req,res)=>{
+  try{res.json({items:await researchStore.list(req.user.id),storage:{state:'saved',durable:true}})}
+  catch(error){res.status(503).json({error:error.message,storage:{state:'unavailable',durable:false}})}
+});
+app.get('/api/research-history/:id',auth,async(req,res)=>{
+  try{const item=await researchStore.get(req.user.id,req.params.id);if(!item)return res.status(404).json({error:'研究记录不存在'});res.json(item)}
+  catch(error){res.status(503).json({error:error.message})}
+});
+app.post('/api/research-history/:id/notes',auth,async(req,res)=>{
+  try{res.json(await researchStore.note(req.user.id,req.params.id,req.body))}
+  catch(error){res.status(error.status||503).json({error:error.message})}
+});
+
 app.get('/styles.css', (_req, res) => res.sendFile(path.join(root, 'styles.css')));
 app.get('/app.js', (_req, res) => res.sendFile(path.join(root, 'app.js')));
+app.use('/api',(_req,res)=>res.status(404).json({error:'接口不存在'}));
+app.use((error,_req,res,_next)=>res.status(503).json({error:'请求或保存失败，记录暂不可读取',detail:error.message}));
 app.use((_req, res) => res.sendFile(path.join(root, 'index.html')));
-initUsers().then(()=>app.listen(PORT, '0.0.0.0', () => console.log(`Allen Stock listening on ${PORT}`))).catch(error=>{console.error('Database initialization failed',error);process.exit(1)});
+initUsers().then(()=>app.listen(PORT, process.env.HOST||'0.0.0.0', () => console.log(`Allen Stock listening on ${PORT}`))).catch(error=>{console.error('Database initialization failed',error);process.exit(1)});

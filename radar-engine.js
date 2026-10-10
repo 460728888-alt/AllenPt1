@@ -1,3 +1,4 @@
+import {failureOf} from './data-contract.js';
 import {radarWindow,mapLimit} from './opportunity.js';
 
 export const categories=[
@@ -43,7 +44,8 @@ export function normalizeFeed(raw,now=new Date()){
  });
 }
 export function historyChange(history,bars){
- const closes=(history||[]).map(x=>x.close).filter(x=>Number.isFinite(x)&&x>0);
+ const closes=(history||[]).map(x=>x.close);
+ if(closes.slice(-bars-1).some(x=>!Number.isFinite(x)||x<=0))return null;
  return closes.length>bars?Number(((closes.at(-1)/closes.at(-1-bars)-1)*100).toFixed(2)):null;
 }
 export function rankIdea(idea,window,risk){
@@ -86,7 +88,7 @@ export async function buildRadar(criteria,deps,progress=()=>{}){
  const checked=await mapLimit(selected,3,async g=>{
    const chosen=[...g.evidence.filter(e=>negativePattern.test(e.title)).slice(0,1),...g.matching.slice(0,2)];
    const evidence=[];
-   for(const a of chosen){try{const content=await deps.content(a.id);evidence.push(extractEvidence({...a,...content},window));}catch{evidence.push(extractEvidence({...a,text:'',bodyError:'正文不可用'},window));}}
+   for(const a of chosen){try{const content=await deps.content(a.id);evidence.push(extractEvidence({...a,...content},window));}catch(error){evidence.push(extractEvidence({...a,text:'',bodyError:'正文不可用',failure:failureOf(error)},window));}}
    done++;progress('读取公告正文与反面证据',done,selected.length);
    const stock=marketMap.get(g.symbol);
    return {symbol:g.symbol,code:g.matching[0].code,name:g.matching[0].name,price:stock?.price??null,changePct:stock?.changePct??null,evidence,
@@ -99,8 +101,8 @@ export async function buildRadar(criteria,deps,progress=()=>{}){
    const r=research.status==='fulfilled'?research.value:null,q=quote.status==='fulfilled'?quote.value:null;
    done++;progress('核验历史涨幅、财务和公司业务',done,deep.length);
    return rankIdea({...idea,name:r?.name&&r.name!==idea.symbol?r.name:idea.name,price:q?.price??idea.price,
-     quoteAt:q?.marketTime?new Date(q.marketTime*1000).toISOString():null,return20:historyChange(q?.history,20),return60:historyChange(q?.history,60),
-     history:q?.history||[],technical:q?.technical||null,
+     quoteAt:q?.marketTime?new Date(q.marketTime*1000).toISOString():null,return20:q?.data?.state==='ok'?historyChange(q.history,20):null,return60:q?.data?.state==='ok'?historyChange(q.history,60):null,
+     history:q?.data?.state==='ok'?q.history:[],technical:q?.technical||null,data:q?.data||{state:'request_failed'},quoteFailure:quote.status==='rejected'?failureOf(quote.reason):null,researchFailure:research.status==='rejected'?failureOf(research.reason):null,dataGaps:[research.status==='rejected'?failureOf(research.reason):null,quote.status==='rejected'?failureOf(quote.reason):null,...(q?.data?.reasons||[]).map(message=>({message}))].filter(Boolean),
      company:r?.company?{industry:r.company.industry,business:r.company.business?.slice(0,800)}:null,
      finance:r?.finance?{reportDate:r.finance.reportDate,noticeDate:r.finance.noticeDate,revenueGrowth:r.finance.revenueGrowth,profitGrowth:r.finance.profitGrowth,netMargin:r.finance.netMargin,debtRatio:r.finance.debtRatio}:null},window,risk);
  });
@@ -117,8 +119,12 @@ export async function buildRadar(criteria,deps,progress=()=>{}){
    announcements:feed.items.length,announcementPages:feed.pages,announcementFailedPages:feed.failedPages,uniqueStocks:grouped.size,titleMatches:titleMatches.length,
    researched:selected.length,withAnnouncements:checked.filter(x=>x.ok).length,failed:checked.filter(x=>!x.ok).length,
    fullBodies:checked.filter(x=>x.ok).reduce((n,x)=>n+x.value.evidence.filter(e=>e.bodyRead).length,0),assessed:assessed.length,
+   stockRequests:{requested:deep.length,returned:assessed.filter(x=>!x.quoteFailure).length,failed:assessed.filter(x=>x.quoteFailure).length+enriched.filter(x=>!x.ok).length,usable:assessed.filter(x=>x.data?.state==='ok').length,failures:assessed.filter(x=>x.quoteFailure).map(x=>({symbol:x.symbol,...x.quoteFailure})),gaps:assessed.filter(x=>x.data?.state!=='ok').map(x=>({symbol:x.symbol,state:x.data?.state,reasons:x.data?.reasons||[]}))},
+   researchRequests:{requested:deep.length,failed:assessed.filter(x=>x.researchFailure).length,failures:assessed.filter(x=>x.researchFailure).map(x=>({symbol:x.symbol,...x.researchFailure}))},
+   bodyRequests:{requested:checked.filter(x=>x.ok).reduce((n,x)=>n+x.value.evidence.length,0),failed:checked.filter(x=>x.ok).reduce((n,x)=>n+x.value.evidence.filter(e=>e.bodyError).length,0),failures:checked.filter(x=>x.ok).flatMap(x=>x.value.evidence.filter(e=>e.failure).map(e=>({id:e.id,...e.failure})))},
+   announcementPageFailures:feed.failures||[],marketPageCoverage:market.pageCoverage||null,
    oldestPublication:items.map(i=>i.publishedAt).sort()[0]||null,marketAvailable:marketResult.status==='fulfilled'};
- const result={schema:2,createdAt:new Date().toISOString(),window,risk,criteria,candidates,excluded,coverage,
+ const result={schema:2,dataState:deep.length&&coverage.stockRequests.usable===0?'unable_to_judge':coverage.stockRequests.usable<deep.length||coverage.bodyRequests.failed||feed.failedPages?'partial':'ok',createdAt:new Date().toISOString(),window,risk,criteria,candidates,excluded,coverage,
    model:{...ranked.status,horizonDays:modelDays,candidateCount:assessed.length},
    answer:'本次依据公告原文、历史价格及可取得的财务资料形成线索。请核验事件兑现与市场预期差。',aiStatus:'未调用',
    limitation:'扫描最近公告，不等于覆盖全部股票或完整未来日历。正文优先核验40/60家公司，行情财务深入核验最多12家，展示最多8家；未核验公司不代表没有机会。'};

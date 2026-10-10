@@ -4,6 +4,7 @@ import {buildVolumeScreenProfile,classifyVolumeCandidate} from './volume-screen.
 
 function rows(){
   return Array.from({length:60},(_,index)=>({
+    open:index<40?12-index*.05:10+(index-40)*.01,
     close:index<40?12-index*.05:10+(index-40)*.01,
     high:index<40?12.2-index*.05:10.2,
     low:index<40?11.8-index*.05:9.8+(index-40)*.005,
@@ -24,9 +25,9 @@ test('缩量横盘进入黄色等待区',()=>{
   assert.equal(label.tone,'yellow');
 });
 
-test('放量突破进入绿色重点区',()=>{
+test('配置未定，放量突破也不能进入绿色合格区',()=>{
   const label=classifyVolumeCandidate({stage:'向上突破待确认'},{usefulPullback:true,riskReward:1.7,volumeDriedUp:false,priceTight:false,lowsStoppedFalling:true});
-  assert.equal(label.tone,'green');
+  assert.equal(label,null);
 });
 
 test('已跟踪股票破位后标红',()=>{

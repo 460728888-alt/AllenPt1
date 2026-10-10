@@ -1,3 +1,4 @@
+import {failureOf} from './data-contract.js';
 // Conservative title-only evidence extraction. Publication dates are never event dates.
 export function radarWindow(days = 30, now = new Date()) {
   const count = Number(days);
@@ -40,6 +41,6 @@ export function radarCandidate(stock,research,window,risk='中'){
 export async function mapLimit(items,limit,fn){
   const out=new Array(items.length);let next=0;
   await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{
-    while(next<items.length){const i=next++;try{out[i]={ok:true,value:await fn(items[i])}}catch{out[i]={ok:false}}}
+    while(next<items.length){const i=next++;try{out[i]={ok:true,value:await fn(items[i])}}catch(error){out[i]={ok:false,item:items[i],error:failureOf(error)}}}
   }));return out;
 }

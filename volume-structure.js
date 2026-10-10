@@ -1,4 +1,5 @@
-const finite = value => Number.isFinite(Number(value)) ? Number(value) : null;
+import {finiteNumber as finite,assertWindow} from './data-contract.js';
+import {priceLevels,SCREEN_STRATEGY} from './price-levels.js';
 const average = values => {
   const usable=values.map(finite).filter(Number.isFinite);
   return usable.length ? usable.reduce((sum,value)=>sum+value,0)/usable.length : null;
@@ -19,11 +20,9 @@ function volumeLabel(ratio,recentRatio){
 function stageResult(stage,tone,action,summary){return {stage,tone,action,summary}}
 
 export function analyzeVolumeStructure(inputRows){
-  const rows=(inputRows||[]).map(row=>({
-    ...row,
-    close:finite(row.close),open:finite(row.open),high:finite(row.high),low:finite(row.low),volume:finite(row.volume)
-  })).filter(row=>Number.isFinite(row.close)&&Number.isFinite(row.volume));
-  if(rows.length<35)throw new Error('量价结构分析至少需要35个有效交易日');
+  const rows=assertWindow(inputRows,Math.min(60,Math.max(35,inputRows?.length||0))).map(row=>({...row,...Object.fromEntries(['open','close','high','low','volume'].map(k=>[k,finite(row[k])]))}));
+  const levels=priceLevels(rows);
+  if(levels.state!=='ok')throw new Error(levels.reason);
 
   const current=rows.at(-1),previous=rows.at(-2);
   const base=rows.slice(-21,-1),recent5=rows.slice(-5),recent10=rows.slice(-10);
@@ -40,8 +39,8 @@ export function analyzeVolumeStructure(inputRows){
   const lowsRising=low10>=priorLow10*.995;
   const highsTightening=high10<=priorHigh10*1.025;
   const compression=rangePct<=12&&Math.abs(pct(ma20,ma5))<=5;
-  const breakout=current.close>=upper*1.003&&volumeRatio>=1.5;
-  const breakdown=current.close<=lower*.997&&volumeRatio>=1.3;
+  const breakout=current.close>=levels.breakout&&volumeRatio>=1.5;
+  const breakdown=current.close<=levels.invalidation;
   const nearUpper=current.close>=upper*.985;
   const nearLower=current.close<=lower*1.02;
   const recentBreakout=rows.slice(-8,-1).some((row,index,arr)=>{
@@ -52,7 +51,7 @@ export function analyzeVolumeStructure(inputRows){
   });
   const pullback=recentBreakout&&current.close>=lower&&current.close<=upper*1.035&&volumeRatio<=1.15;
   let decision;
-  if(breakdown)decision=stageResult('结构失效','red','暂停考虑','放量跌破近20日结构下沿，原蓄势假设暂时失效。');
+  if(breakdown)decision=stageResult('结构失效','red','暂停考虑','收盘触及近20日结构失效价，原蓄势假设暂时失效。');
   else if(breakout)decision=stageResult('向上突破待确认','green','进入确认观察','收盘放量突破结构上沿，等待随后1—3个交易日能否守住突破位。');
   else if(pullback)decision=stageResult('突破后回踩','green','观察回踩确认','此前曾出现放量突破，目前缩量回踩；守住突破区域才属于有效确认。');
   else if(compression&&nearUpper)decision=stageResult('上沿试探','blue','关注但不追涨','价格接近结构上沿，但量价尚未同时达到突破确认标准。');
@@ -60,20 +59,19 @@ export function analyzeVolumeStructure(inputRows){
   else if(nearLower||ma5<ma20)decision=stageResult('回调观察','orange','等待止跌','价格处于结构下部或短期均价仍弱，尚未形成向上确认。');
   else decision=stageResult('区间震荡','yellow','继续等待','价格仍在结构区间内，当前没有足够量能证明方向。');
 
-  const confirmPrice=upper*1.003,invalidationPrice=lower*.997,target1=upper+(upper-lower);
-  const risk=Math.max(.01,confirmPrice-invalidationPrice),reward=target1-confirmPrice;
+  const {breakout:confirmPrice,invalidation:invalidationPrice,target1}=levels;
   const position=current.close>=upper?'上方':current.close<=lower?'下方':current.close>=midpoint?'区间上半部':'区间下半部';
   return {
-    ...decision,
+    ...decision,levels,strategy:SCREEN_STRATEGY,
     currentPrice:round(current.close),
     windowDays:20,
     range:{lower:round(lower),upper:round(upper),midpoint:round(midpoint),widthPct:round(rangePct,1)},
-    prices:{confirm:round(confirmPrice),invalidation:round(invalidationPrice),target1:round(target1)},
+    prices:{confirm:round(confirmPrice),invalidation:round(invalidationPrice),target1,target2:levels.target2},
     volume:{current:Math.round(current.volume),average20:Math.round(avgVolume20),ratio:round(volumeRatio,2),recentRatio:round(recentVolumeRatio,2),label:volumeLabel(volumeRatio,recentVolumeRatio)},
     evidence:{compression,lowsRising,highsTightening,nearUpper,nearLower,aboveMa20:current.close>=ma20,ma5:round(ma5),ma20:round(ma20),position},
-    riskReward:round(reward/risk,2),
+    riskReward:levels.rr1,riskReward2:levels.rr2,
     confirmation:`收盘不低于 ${round(confirmPrice)}，且当日成交量达到20日均量的1.5倍以上`,
-    invalidation:`收盘不高于 ${round(invalidationPrice)}，且成交量达到20日均量的1.3倍以上`,
+    invalidation:`收盘不高于 ${round(invalidationPrice)}，不等待放量；实际成交可能受跳空、跌停或停牌影响`,
     note:'结构判断只使用已完成的日线和成交量；盘中突破、单日脉冲或无量上涨不视为确认。'
   };
 }

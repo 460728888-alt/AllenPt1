@@ -10,7 +10,7 @@ const futureText=tomorrow.replace(/(\d{4})-(\d{2})-(\d{2})/,'$1年$2月$3日');
 const body=('公司计划于'+futureText+'召开产品发布会。预计对营业收入产生积极影响，具体以审计数据为准。市场需求仍有不确定性。').repeat(4);
 const feedRows=Array.from({length:70},(_,i)=>({art_code:'AN20260913000'+i,title:'公司'+i+'新产品发布公告',notice_date:tomorrow,
  display_time:new Date(Date.now()+8*3600000-60000).toISOString().slice(0,19).replace('T',' '),codes:[{stock_code:String(600000+i),short_name:'测试公司'+i}]}));
-const quotes={price:100,marketTime:Math.floor(Date.now()/1000),history:Array.from({length:90},()=>({close:100})),technical:{score:55}};
+const quotes={data:{state:'ok',dataThrough:criteria.window.start},price:100,marketTime:Math.floor(Date.now()/1000),history:Array.from({length:90},()=>({close:100})),technical:{score:55}};
 const dependencies={feed:async()=>({items:feedRows,pages:10,failedPages:0}),market:async()=>({rows:[],total:5000,pages:50}),
  content:async()=>({text:body}),quote:async()=>quotes,research:async()=>({company:{industry:'测试行业'},finance:{profitGrowth:10,reportDate:'2026-06-30'}})};
 test('reject invalid selectors and preserve choices',()=>{
@@ -37,7 +37,7 @@ test('missing body and unavailable AI are transparent',async()=>{
  const r=await buildRadar(criteria,{...dependencies,content:async()=>{throw Error('missing')},ai:async()=>{throw Error('no key')}});
  assert.equal(r.coverage.fullBodies,0);assert.equal(r.candidates[0].group,'时间待核验');assert.match(r.aiStatus,/不可用/);
 });
-test('API jobs, account isolation, append-only reviews, snapshots',async()=>{
+test('API job isolation and unavailable persistence are explicit (real persistence tested separately)',async()=>{
  const app=express();app.use(express.json());
  const auth=(req,res,next)=>{if(!req.headers['x-test-user'])return res.sendStatus(401);req.user={id:req.headers['x-test-user'],username:req.headers['x-test-user']};next()};
  registerRadar({app,auth,pool:null,market:dependencies.market,research:dependencies.research,quote:dependencies.quote,ai:null,
@@ -51,16 +51,10 @@ test('API jobs, account isolation, append-only reviews, snapshots',async()=>{
   assert.equal((await request('/api/ai/radar-jobs/'+jobId,'two')).status,404);
   let job;for(let n=0;n<30;n++){job=await(await request('/api/ai/radar-jobs/'+jobId)).json();if(job.status!=='running')break;await new Promise(r=>setTimeout(r,10));}
   assert.equal(job.status,'done');assert.equal(job.result.risk,'高');assert.equal(job.result.durable,false);
-  assert.equal((await(await request('/api/ai/radar-history','two')).json()).reports.length,0);
-  const input={reportId:job.result.id,symbol:job.result.candidates[0].symbol};
-  const entry=await(await request('/api/radar/journal','one',input)).json();assert.ok(entry.item.id);
-  assert.equal((await request('/api/radar/journal','two',input)).status,404);
-  const id=entry.item.id;
-  assert.equal((await request('/api/radar/journal/'+id+'/review','two',{note:'not mine'})).status,404);
-  await request('/api/radar/journal/'+id+'/review','one',{status:'需要复核',note:'检查交付证据'});
-  await request('/api/radar/journal/'+id+'/review','one',{status:'逻辑失效',note:'计划已取消'});
-  const check=await(await request('/api/radar/journal/'+id+'/check','one',{})).json();assert.equal(check.check.changeFromBaseline,0);
-  const stored=(await(await request('/api/radar/journal')).json()).items[0];assert.equal(stored.notes.length,2);assert.equal(stored.status,'逻辑失效');
-  const original=(await(await request('/api/ai/radar-history')).json()).reports[0];assert.deepEqual(original,job.result);
+  assert.equal((await request('/api/ai/radar-history','two')).status,503);
+  assert.equal((await request('/api/radar/journal')).status,503);
+  assert.equal((await request('/api/radar/journal','one',{reportId:job.result.id,symbol:'600000.SS'})).status,503);
+  assert.equal(job.result.storage.durable,false);
+  assert.match(job.result.storage.message,/保存失败/);
  }finally{server.closeAllConnections();await new Promise(r=>server.close(r))}
 });
