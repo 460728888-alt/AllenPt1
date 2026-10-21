@@ -5,18 +5,18 @@ on:
     branches:
       - fix/forecast-horizon-v1
     paths:
-      - probability-contract.js
-      - probability-contract.test.js
-      - data-contract.js
+      - '**/*.js'
+      - package.json
+      - package-lock.json
       - .github/workflows/forecast-horizon-check.yml
 
 permissions:
   contents: read
 
 jobs:
-  probability-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  regression-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       NODE_ENV: test
       DATABASE_URL: ''
@@ -33,9 +33,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: 检查语法并运行概率测试
+      - name: 安装项目依赖但不运行安装脚本
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: 运行项目现有 Node 检查
         run: |
           node --version
-          node --check probability-contract.js
-          node --check probability-contract.test.js
-          node --test probability-contract.test.js
+          npm run check
