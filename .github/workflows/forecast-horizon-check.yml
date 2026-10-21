@@ -1,0 +1,41 @@
+name: 短线概率校验
+
+on:
+  push:
+    branches:
+      - fix/forecast-horizon-v1
+    paths:
+      - probability-contract.js
+      - probability-contract.test.js
+      - data-contract.js
+      - .github/workflows/forecast-horizon-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probability-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ''
+      AI_API_KEY: ''
+      FORECAST_API_URL: ''
+    steps:
+      - name: 读取当前分支代码
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: 准备 Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: 检查语法并运行概率测试
+        run: |
+          node --version
+          node --check probability-contract.js
+          node --check probability-contract.test.js
+          node --test probability-contract.test.js
