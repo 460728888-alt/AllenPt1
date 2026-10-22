@@ -1,0 +1,337 @@
+name: 研究卡一致性修复候选包
+
+on:
+  push:
+    branches:
+      - fix/forecast-horizon-v1
+    paths:
+      - .github/workflows/build-reliability-fix.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allen_test_user
+          POSTGRES_PASSWORD: local_test_only
+          POSTGRES_DB: allen_test_research
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U allen_test_user -d allen_test_research"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ''
+      AI_API_KEY: ''
+      FORECAST_API_URL: ''
+      TEST_DATABASE_URL: postgresql://allen_test_user:local_test_only@127.0.0.1:5432/allen_test_research
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: 安装依赖
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: 准备日志目录
+        run: mkdir -p test-logs
+
+      - name: 仅在临时目录生成修复
+        run: |
+          node --input-type=module <<'NODE' 2>&1 | tee test-logs/prepare.log
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+
+          const helper=String.raw`// Only a persisted event can label an original hypothesis invalidated.
+          export function researchCardState(item,stored) {
+            if (!stored?.snapshot || !stored.research_id) throw Error('原始研究快照读取失败，未完成保存');
+            const state=stored.latest_state,stop=stored.snapshot.levels?.stop;
+            const out={...item,researchId:stored.research_id,original:stored.snapshot,
+              snapshotHash:stored.snapshot_hash,giveUpPrice:Number.isFinite(stop)&&stop>0?stop:null,
+              originalInvalid:state?.status==='invalidated',researchStatus:state?.status||'unverified',
+              researchStatusThrough:state?.dataThrough||null};
+            if (state?.status==='invalidated') return {...out,tone:'red',status:'🔴 原始结构已失效',
+              reason:'依据已留档的判断；本次缺失数据不作为新的失效依据'};
+            if (['closed','expired'].includes(state?.status)) return {...out,tone:'orange',status:'原研究已结束',
+              reason:'保留原始记录；新的机会须另建研究编号'};
+            const date=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&
+              Number.isFinite(Date.parse(d))&&new Date(d).toISOString().slice(0,10)===d;
+            const cutoff=item.dataThrough,recordedCutoff=state?.dataThrough;
+            const outdated=date(cutoff)&&date(recordedCutoff)&&cutoff<recordedCutoff;
+            const uncertain=!state || !['tracking','review'].includes(state.status) ||
+              state.kind==='data_gap' || item.data?.state!=='ok' ||
+              !Number.isFinite(item.price) || item.price<=0 || !Number.isFinite(stop) || stop<=0 ||
+              !date(cutoff) || !date(recordedCutoff) || outdated;
+            if (uncertain) return {...out,tone:'orange',status:'当前数据待核验',
+              reason:outdated?'本次数据早于已留档时点，保留原判断':'数据或原始条件不足，暂停新的确认及失效判断'};
+            if (state.status==='review' || item.tone==='red' || item.price<=stop)
+              return {...out,tone:'orange',status:'原判断需要复核',
+                reason:'扫描条件与留档状态需复核，不补造失效结论'};
+            return out;
+          }
+          `;
+
+          const unit=String.raw`import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import {researchCardState as card} from './research-card-state.js';
+
+          // Synthetic fixtures, not market results.
+          const current=(extra={})=>({dataThrough:'2026-10-14',data:{state:'ok'},price:11,tone:'yellow',...extra});
+          const stored=(status='tracking',kind='refreshed')=>({
+            research_id:'synthetic-episode',snapshot:{dataThrough:'2026-10-12',levels:{stop:10}},
+            snapshot_hash:'synthetic-only',latest_state:{status,kind,dataThrough:'2026-10-14'}
+          });
+          test('invalid data states pause the card instead of invalidating the hypothesis',()=>{
+            for(const state of ['insufficient','stale','request_failed',undefined]) {
+              const r=card(current({data:{state},price:8}),stored());
+              assert.equal(r.tone,'orange');assert.equal(r.originalInvalid,false);
+              assert.equal(r.researchStatus,'tracking');
+            }
+          });
+          test('missing, malformed and nonpositive prices cannot invalidate a card',()=>{
+            for(const price of [null,undefined,NaN,Infinity,'',0,-1]) {
+              const r=card(current({price}),stored());
+              assert.equal(r.tone,'orange');assert.equal(r.originalInvalid,false);
+            }
+          });
+          test('missing or impossible cutoff dates pause the card',()=>{
+            for(const dataThrough of [null,'','2026-02-30','2026-13-01']) {
+              assert.equal(card(current({dataThrough}),stored()).status,'当前数据待核验');
+            }
+          });
+          test('a persisted gap remains paused even if the new card claims good data',()=>{
+            assert.equal(card(current(),stored('tracking','data_gap')).status,'当前数据待核验');
+          });
+          test('older observations do not change the recorded judgment',()=>{
+            const r=card(current({dataThrough:'2026-10-13',price:8}),stored());
+            assert.equal(r.tone,'orange');assert.equal(r.researchStatus,'tracking');
+            assert.match(r.reason,/早于/);
+          });
+          test('a raw price comparison alone cannot create an invalidated judgment',()=>{
+            const r=card(current({price:8}),stored());
+            assert.equal(r.tone,'orange');assert.equal(r.originalInvalid,false);
+          });
+          test('an incoming red marker cannot override a tracking event',()=>{
+            const r=card(current({tone:'red',originalInvalid:true}),stored());
+            assert.equal(r.tone,'orange');assert.equal(r.originalInvalid,false);
+          });
+          test('a recorded invalidation remains visible when current data are unavailable',()=>{
+            const r=card(current({data:{state:'insufficient'},price:null}),stored('invalidated','invalidated'));
+            assert.equal(r.tone,'red');assert.equal(r.originalInvalid,true);
+            assert.match(r.reason,/已留档/);
+          });
+          test('normal tracking keeps the observation category',()=>{
+            assert.equal(card(current(),stored()).tone,'yellow');
+          });
+          test('closed and expired episodes cannot appear as active confirmations',()=>{
+            for(const status of ['closed','expired']) {
+              const r=card(current({tone:'green'}),stored(status));
+              assert.equal(r.tone,'orange');assert.equal(r.status,'原研究已结束');
+            }
+          });
+          test('review status is explicit',()=>{
+            assert.equal(card(current(),stored('review','note')).status,'原判断需要复核');
+          });
+          test('the original stop never follows a recalculated stop',()=>{
+            assert.equal(card(current({giveUpPrice:9,levels:{stop:9}}),stored()).giveUpPrice,10);
+          });
+          test('missing and unknown event statuses pause the card',()=>{
+            const r=stored();delete r.latest_state;
+            assert.equal(card(current(),r).tone,'orange');
+            assert.equal(card(current(),stored('unknown')).tone,'orange');
+          });
+          test('a missing original fails explicitly',()=>{
+            assert.throws(()=>card(current(),null),/快照读取失败/);
+          });
+          test('inputs and original snapshot are not modified',()=>{
+            const a=current(),b=stored(),before=JSON.stringify([a,b]);
+            Object.freeze(a);Object.freeze(b.snapshot.levels);Object.freeze(b.snapshot);
+            Object.freeze(b.latest_state);Object.freeze(b);
+            card(a,b);assert.equal(JSON.stringify([a,b]),before);
+          });
+          `;
+
+          const regression=String.raw`      await t.test('returned cards match saved events for missing data and prices',async()=>{
+                  const firstBad=await store.saveVolumeScan(1,scan([
+                    observation('600007.SS','2026-10-12',{price:null})
+                  ]));
+                  assert.equal(firstBad.items[0].tone,'orange');
+                  assert.equal(firstBad.items[0].researchId,null);
+                  assert.equal((await store.list(1)).filter(r=>r.symbol==='600007.SS').length,0);
+                  const symbol='600006.SS';
+                  const initial=await store.saveVolumeScan(1,scan([observation(symbol)]));
+                  const id=initial.items[0].researchId,original=(await store.get(1,id)).original;
+                  for(const [state,price] of [
+                    ['insufficient',8],['stale',8],['request_failed',8],
+                    ['ok',null],['ok',0],['ok',-1],['ok','']
+                  ]) {
+                    const saved=await store.saveVolumeScan(1,scan([
+                      observation(symbol,'2026-10-13',{data:{state},price})
+                    ]));
+                    const card=saved.items[0],history=await store.get(1,id);
+                    assert.equal(card.researchId,id);
+                    assert.equal(card.tone,'orange');
+                    assert.equal(card.originalInvalid,false);
+                    assert.equal(history.events.at(-1).kind,'data_gap');
+                    assert.equal(card.researchStatus,history.events.at(-1).payload.status);
+                    assert.equal(card.researchStatus,'tracking');
+                    assert.deepEqual(history.original,original);
+                  }
+                  const confirmed=await store.saveVolumeScan(1,scan([
+                    observation(symbol,'2026-10-14',{price:10})
+                  ]));
+                  const history=await store.get(1,id);
+                  assert.equal(confirmed.items[0].tone,'red');
+                  assert.equal(confirmed.items[0].researchStatus,history.events.at(-1).payload.status);
+                  assert.equal(confirmed.items[0].originalInvalid,true);
+                  assert.deepEqual(history.original,original);
+                });
+
+          `;
+
+          const edits=[
+            [
+              "    const cutoff=snapshot.dataThrough;",
+              "    const cutoff=snapshot.dataThrough;\n    const usable=snapshot.data?.state==='ok'&&(channel!=='volume'||(Number.isFinite(snapshot.price)&&snapshot.price>0));"
+            ],
+            [
+              "if(!canCreate||snapshot.data?.state!=='ok'||",
+              "if(!canCreate||!usable||"
+            ],
+            [
+              "} else if(snapshot.data?.state!=='ok'||(channel==='volume'",
+              "} else if(!usable||(channel==='volume'"
+            ],
+            [
+              "'SELECT snapshot,snapshot_hash FROM research_opportunities WHERE user_id=$1 AND id=$2'",
+              "\"SELECT o.id AS research_id,o.snapshot,o.snapshot_hash,(SELECT jsonb_build_object('status',e.payload->>'status,'kind',e.kind,'dataThrough',e.data_through::text) FROM research_events e WHERE e.user_id=o.user_id AND e.research_id=o.id ORDER BY e.sequence DESC LIMIT 1) AS latest_state FROM research_opportunities o WHERE o.user_id=$1 AND o.id=$2\""
+            ],
+            [
+              "Object.assign(item,{researchId:id,original:original.snapshot,snapshotHash:original.snapshot_hash,giveUpPrice:original.snapshot.levels?.stop??item.giveUpPrice});",
+              "Object.assign(item,researchCardState(item,original));"
+            ],
+            [
+              "if(originalScaleComparable(original.snapshot,item)&&item.price<=original.snapshot.levels?.stop)Object.assign(item,{tone:'red',status:'🔴 原始结构已失效',reason:'收盘触及原始快照失效价，不等待放量'});",
+              ""
+            ],
+            [
+              "        if(id&&bySymbol.has(snapshot.symbol)) {",
+              "        if(!id&&bySymbol.has(snapshot.symbol))Object.assign(bySymbol.get(snapshot.symbol),{researchId:null,original:null,originalInvalid:false,tone:'orange',status:'原始研究尚未建立',reason:'本次观测未通过新建条件，未补造原始判断'});\n        if(id&&bySymbol.has(snapshot.symbol)) {"
+            ]
+          ];
+
+          const replaceOnce=(text,before,after)=>{
+            if(text.split(before).length!==2)throw Error('补丁位置与核对版本不符，停止生成');
+            return text.replace(before,after);
+          };
+          for(const name of ['research-card-state.js','research-card-state.test.js']) {
+            if(fs.existsSync(name))throw Error('目标文件已存在，停止自动覆盖：'+name);
+          }
+          const beforeStore=fs.readFileSync('research-store.js','utf8');
+          const beforePg=fs.readFileSync('tests/postgres-integration.mjs','utf8');
+          let nextStore="import {researchCardState} from './research-card-state.js';\n"+beforeStore;
+          for(const [before,after] of edits)nextStore=replaceOnce(nextStore,before,after);
+          const anchor="      await t.test('notes are append-only and repeated requests are idempotent',async()=>{";
+          const nextPg=replaceOnce(beforePg,anchor,regression+anchor);
+          const updates={
+            'research-card-state.js':helper,
+            'research-card-state.test.js':unit,
+            'research-store.js':nextStore,
+            'tests/postgres-integration.mjs':nextPg
+          };
+          const hash=text=>crypto.createHash('sha256').update(text).digest('hex');
+          const report={
+            sourceCommit:process.env.GITHUB_SHA,sourceBranch:process.env.GITHUB_REF_NAME,
+            scope:'research-card-consistency-v1',schemaChanged:false,
+            files:Object.entries(updates).map(([name,content])=>({
+              name,before:fs.existsSync(name)?hash(fs.readFileSync(name,'utf8')):null,
+              after:hash(content)
+            }))
+          };
+          for(const [name,content] of Object.entries(updates))fs.writeFileSync(name,content);
+          fs.writeFileSync('PATCH-REPORT.json',JSON.stringify(report,null,2));
+          console.log('已在临时工作目录应用四个文件的改动，未推送仓库。');
+          NODE
+
+      - name: 检查新增文件和全部单元测试
+        run: |
+          node --check research-card-state.js
+          node --check research-card-state.test.js
+          node --check research-store.js
+          node --check tests/postgres-integration.mjs
+          npm run check 2>&1 | tee test-logs/unit.log
+
+      - name: 真实 PostgreSQL UTC 回归
+        run: TZ=UTC node --test tests/postgres-integration.mjs 2>&1 | tee test-logs/postgres-utc.log
+
+      - name: 真实 PostgreSQL 上海时区回归
+        run: TZ=Asia/Shanghai node --test tests/postgres-integration.mjs 2>&1 | tee test-logs/postgres-shanghai.log
+
+      - name: 检查通过后整理新源码
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          import {execFileSync} from 'node:child_process';
+
+          const names=[...new Set([
+            ...execFileSync('git',['ls-files','-z'],{encoding:'utf8'}).split('\0').filter(Boolean),
+            'research-card-state.js','research-card-state.test.js','PATCH-REPORT.json'
+          ])].filter(name=>!name.split('/').includes('node_modules')&&!/(^|\/)\.env($|\.)/.test(name));
+          fs.mkdirSync('delivery',{recursive:true});
+          const hashes={};
+          for(const name of names) {
+            if(!fs.lstatSync(name).isFile())throw Error('不打包非普通文件：'+name);
+            const target=path.join('delivery',name);
+            fs.mkdirSync(path.dirname(target),{recursive:true});
+            fs.copyFileSync(name,target);
+            hashes[name]=crypto.createHash('sha256').update(fs.readFileSync(name)).digest('hex');
+          }
+          const note=[
+            '本批候选：研究卡与留档状态一致性修复。',
+            '已执行：项目单元检查、临时 PostgreSQL UTC 与 Asia/Shanghai 检查。',
+            '尚未验收：完整网站 HTTP、整站重启、浏览器、备份恢复、策略收益。',
+            '无数据库表结构变更，工作流未推送业务源码，未连接生产数据库，未部署。',
+            '整包供审阅后上传独立分支；部署仍需单独确认。',
+            '本说明与本次 Actions 结果是本批证据；旧审查文档不代表本批完成状态。',
+            '生成来源提交：'+process.env.GITHUB_SHA
+          ].join('\n');
+          fs.writeFileSync('delivery/DELIVERY-NOTES.txt',note);
+          hashes['DELIVERY-NOTES.txt']=crypto.createHash('sha256').update(note).digest('hex');
+          fs.writeFileSync('delivery/SHA256SUMS.json',JSON.stringify(hashes,null,2));
+          NODE
+
+      - name: 下载带修复的新源码包
+        uses: actions/upload-artifact@v4
+        with:
+          name: AllenPt1-reliability-candidate
+          path: delivery/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: 保留实际测试日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reliability-test-logs
+          path: test-logs/
+          if-no-files-found: warn
+          retention-days: 7
