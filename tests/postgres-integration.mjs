@@ -219,6 +219,42 @@ if (process.argv[2]?.startsWith('worker-')) {
         assert.deepEqual((await store.get(1,id)).original,original);
       });
 
+      await t.test('returned cards match saved events for missing data and prices',async()=>{
+        const firstBad=await store.saveVolumeScan(1,scan([
+          observation('600007.SS','2026-10-12',{price:null})
+        ]));
+        assert.equal(firstBad.items[0].tone,'orange');
+        assert.equal(firstBad.items[0].researchId,null);
+        assert.equal((await store.list(1)).filter(r=>r.symbol==='600007.SS').length,0);
+        const symbol='600006.SS';
+        const initial=await store.saveVolumeScan(1,scan([observation(symbol)]));
+        const id=initial.items[0].researchId,original=(await store.get(1,id)).original;
+        for(const [state,price] of [
+          ['insufficient',8],['stale',8],['request_failed',8],
+          ['ok',null],['ok',0],['ok',-1],['ok','']
+        ]) {
+          const saved=await store.saveVolumeScan(1,scan([
+            observation(symbol,'2026-10-13',{data:{state},price})
+          ]));
+          const card=saved.items[0],history=await store.get(1,id);
+          assert.equal(card.researchId,id);
+          assert.equal(card.tone,'orange');
+          assert.equal(card.originalInvalid,false);
+          assert.equal(history.events.at(-1).kind,'data_gap');
+          assert.equal(card.researchStatus,history.events.at(-1).payload.status);
+          assert.equal(card.researchStatus,'tracking');
+          assert.deepEqual(history.original,original);
+        }
+        const confirmed=await store.saveVolumeScan(1,scan([
+          observation(symbol,'2026-10-14',{price:10})
+        ]));
+        const history=await store.get(1,id);
+        assert.equal(confirmed.items[0].tone,'red');
+        assert.equal(confirmed.items[0].researchStatus,history.events.at(-1).payload.status);
+        assert.equal(confirmed.items[0].originalInvalid,true);
+        assert.deepEqual(history.original,original);
+      });
+
       await t.test('notes are append-only and repeated requests are idempotent',async()=>{
         const input=scan([observation('600003.SS')]);
         const id=(await store.saveVolumeScan(1,input)).items[0].researchId;
