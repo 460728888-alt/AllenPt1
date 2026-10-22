@@ -220,7 +220,7 @@ jobs:
             ],
             [
               "'SELECT snapshot,snapshot_hash FROM research_opportunities WHERE user_id=$1 AND id=$2'",
-              "\"SELECT o.id AS research_id,o.snapshot,o.snapshot_hash,(SELECT jsonb_build_object('status',e.payload->>'status,'kind',e.kind,'dataThrough',e.data_through::text) FROM research_events e WHERE e.user_id=o.user_id AND e.research_id=o.id ORDER BY e.sequence DESC LIMIT 1) AS latest_state FROM research_opportunities o WHERE o.user_id=$1 AND o.id=$2\""
+              "\"SELECT o.id AS research_id,o.snapshot,o.snapshot_hash,(SELECT jsonb_build_object('status',e.payload->>'status','kind',e.kind,'dataThrough',e.data_through::text) FROM research_events e WHERE e.user_id=o.user_id AND e.research_id=o.id ORDER BY e.sequence DESC LIMIT 1) AS latest_state FROM research_opportunities o WHERE o.user_id=$1 AND o.id=$2\""
             ],
             [
               "Object.assign(item,{researchId:id,original:original.snapshot,snapshotHash:original.snapshot_hash,giveUpPrice:original.snapshot.levels?.stop??item.giveUpPrice});",
