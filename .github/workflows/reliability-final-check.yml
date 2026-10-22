@@ -1,0 +1,116 @@
+name: 上传版本最终验收
+
+on:
+  push:
+    branches: [fix/forecast-horizon-v1]
+    paths:
+      - '**/*.js'
+      - '**/*.mjs'
+      - 'package*.json'
+      - 'migrations/**'
+      - 'calendars/**'
+      - '.github/workflows/reliability-final-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/fix/forecast-horizon-v1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        shell: bash
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allen_test_user
+          POSTGRES_PASSWORD: local_test_only
+          POSTGRES_DB: allen_test_research
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U allen_test_user -d allen_test_research"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ''
+      AI_API_KEY: ''
+      FORECAST_API_URL: ''
+      TEST_BROWSER: 'false'
+      TEST_DATABASE_URL: postgresql://allen_test_user:local_test_only@127.0.0.1:5432/allen_test_research
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: 核对文件并记录本次版本
+        run: |
+          set -euo pipefail
+          mkdir -p test-logs
+          git rev-parse HEAD > test-logs/source-commit.txt
+          sha256sum \
+            app.js \
+            server.js \
+            research-store.js \
+            research-card-state.js \
+            research-card-state.test.js \
+            tests/postgres-integration.mjs \
+            tests/postgres-http.mjs \
+            tests/browser-integration.mjs \
+            tests/api-integration.mjs \
+            > test-logs/source-sha256.txt
+
+      - name: 安装依赖
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: 项目单元检查
+        run: |
+          set -euo pipefail
+          node --check tests/postgres-http.mjs
+          npm run check 2>&1 | tee test-logs/unit.log
+
+      - name: UTC 数据库和整站检查
+        run: |
+          set -euo pipefail
+          TZ=UTC npm run test:postgres 2>&1 | tee test-logs/utc.log
+
+      - name: 上海时区数据库和整站检查
+        run: |
+          set -euo pipefail
+          TZ=Asia/Shanghai npm run test:postgres 2>&1 | tee test-logs/shanghai.log
+
+      - name: 安装浏览器
+        run: npx playwright install --with-deps chromium
+
+      - name: 平板手机桌面交互检查
+        run: |
+          set -euo pipefail
+          TZ=UTC npm run test:browser 2>&1 | tee test-logs/browser.log
+
+      - name: 确认测试没有修改已提交代码
+        run: git diff --exit-code
+
+      - name: 保存版本记录日志和合成截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-version-acceptance-evidence
+          path: |
+            test-logs/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 7
