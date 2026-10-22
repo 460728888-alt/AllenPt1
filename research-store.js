@@ -1,3 +1,4 @@
+import {researchCardState} from './research-card-state.js';
 import {originalScaleComparable} from './data-contract.js';
 import crypto from 'node:crypto';
 import {SCREEN_STRATEGY,PRICE_VERSION} from './price-levels.js';
@@ -33,19 +34,20 @@ export function createResearchStore(pool,{enabled=false}={}) {
     const last=head?(await c.query('SELECT *,data_through::text AS data_through FROM research_events WHERE user_id=$1 AND research_id=$2 ORDER BY sequence DESC LIMIT 1',[userId,head.id])).rows[0]:null;
     let id=head?.id,status=last?.payload?.status||'tracking',kind='refreshed';
     const cutoff=snapshot.dataThrough;
+    const usable=snapshot.data?.state==='ok'&&(channel!=='volume'||(Number.isFinite(snapshot.price)&&snapshot.price>0));
     if(!/^\d{4}-\d{2}-\d{2}$/.test(cutoff||''))throw Error('原始研究缺少数据截止日期');
     // PostgreSQL DATE is a calendar date, not a local-midnight JS timestamp.
     const previousCutoff=last?.data_through||null;
     if(previousCutoff&&cutoff<previousCutoff)return id; // Delayed request cannot move an episode backwards.
     if(!head||ended(status)) {
-      if(!canCreate||snapshot.data?.state!=='ok'||(previousCutoff&&cutoff<=previousCutoff))return id||null;
+      if(!canCreate||!usable||(previousCutoff&&cutoff<=previousCutoff))return id||null;
       id=crypto.randomUUID();status='tracking';kind='created';
       const frozen=JSON.parse(JSON.stringify(snapshot));
       await c.query(`INSERT INTO research_opportunities(id,user_id,symbol,channel,strategy_version,calculation_version,source_scan_id,data_through,snapshot,snapshot_hash)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,[id,userId,symbol,channel,strategyVersion,PRICE_VERSION,scanId,cutoff,JSON.stringify(frozen),snapshotHash(frozen)]);
       await c.query(`INSERT INTO research_episode_heads(user_id,symbol,channel,strategy_version,research_id) VALUES($1,$2,$3,$4,$5)
         ON CONFLICT(user_id,symbol,channel,strategy_version) DO UPDATE SET research_id=EXCLUDED.research_id`,[userId,symbol,channel,strategyVersion,id]);
-    } else if(snapshot.data?.state!=='ok'||(channel==='volume'&&!originalScaleComparable(head.snapshot,snapshot)))kind='data_gap';
+    } else if(!usable||(channel==='volume'&&!originalScaleComparable(head.snapshot,snapshot)))kind='data_gap';
     else if(channel==='volume'&&Number.isFinite(snapshot.price)&&Number.isFinite(head.snapshot?.levels?.stop)&&snapshot.price<=head.snapshot.levels.stop) {
       status='invalidated';kind='invalidated';
     }
@@ -63,11 +65,12 @@ export function createResearchStore(pool,{enabled=false}={}) {
       const bySymbol=new Map(result.items.map(i=>[i.symbol,i]));
       for(const snapshot of [...result.observations].sort((a,b)=>a.symbol.localeCompare(b.symbol))) {
         const id=await record(c,userId,{symbol:snapshot.symbol,channel:'volume',strategyVersion:SCREEN_STRATEGY.version,scanId:result.id,snapshot,canCreate:bySymbol.has(snapshot.symbol)&&!snapshot.originalInvalid});
+        if(!id&&bySymbol.has(snapshot.symbol))Object.assign(bySymbol.get(snapshot.symbol),{researchId:null,original:null,originalInvalid:false,tone:'orange',status:'原始研究尚未建立',reason:'本次观测未通过新建条件，未补造原始判断'});
         if(id&&bySymbol.has(snapshot.symbol)) {
           const item=bySymbol.get(snapshot.symbol);
-          const original=(await c.query('SELECT snapshot,snapshot_hash FROM research_opportunities WHERE user_id=$1 AND id=$2',[userId,id])).rows[0];
-          Object.assign(item,{researchId:id,original:original.snapshot,snapshotHash:original.snapshot_hash,giveUpPrice:original.snapshot.levels?.stop??item.giveUpPrice});
-          if(originalScaleComparable(original.snapshot,item)&&item.price<=original.snapshot.levels?.stop)Object.assign(item,{tone:'red',status:'🔴 原始结构已失效',reason:'收盘触及原始快照失效价，不等待放量'});
+          const original=(await c.query("SELECT o.id AS research_id,o.snapshot,o.snapshot_hash,(SELECT jsonb_build_object('status',e.payload->>'status','kind',e.kind,'dataThrough',e.data_through::text) FROM research_events e WHERE e.user_id=o.user_id AND e.research_id=o.id ORDER BY e.sequence DESC LIMIT 1) AS latest_state FROM research_opportunities o WHERE o.user_id=$1 AND o.id=$2",[userId,id])).rows[0];
+          Object.assign(item,researchCardState(item,original));
+          
         }
       }
       const saved={...result,storage:{state:'saved',durable:true}};

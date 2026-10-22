@@ -719,7 +719,7 @@ app.get('/api/session',async(req,res)=>{
     const token=cookies(req).allen_session;if(!token)return res.json({authenticated:false,user:null});
     if(pool){const row=(await pool.query(`SELECT u.id,u.username,u.display_name,u.role FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>NOW() AND u.active=TRUE`,[tokenHash(token)])).rows[0];return res.json({authenticated:Boolean(row),user:row?{id:row.id,username:row.username,displayName:row.display_name,role:row.role}:null})}
     const session=sessions.get(token),valid=Boolean(session&&session.expires>Date.now());res.json({authenticated:valid,user:valid?session.user:null});
-  }catch{res.json({authenticated:false,user:null})}
+  }catch{res.status(503).json({authenticated:null,user:null,error:'登录状态暂不可核验，服务暂不可用',storage:{state:'unavailable',durable:false}})}
 });
 app.post('/api/login', async (req, res) => {
   const username = String(req.body.username || '').trim().toLowerCase().slice(0,40);
