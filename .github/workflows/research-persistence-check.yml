@@ -1,0 +1,67 @@
+name: 研究记录数据库验收
+
+on:
+  push:
+    branches:
+      - fix/forecast-horizon-v1
+    paths:
+      - research-store.js
+      - data-contract.js
+      - price-levels.js
+      - migrations/001_research_history.sql
+      - tests/postgres-integration.mjs
+      - package.json
+      - package-lock.json
+      - .github/workflows/research-persistence-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        timezone: [UTC, Asia/Shanghai]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allen_test_user
+          POSTGRES_PASSWORD: local_test_only
+          POSTGRES_DB: allen_test_research
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U allen_test_user -d allen_test_research"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      TZ: ${{ matrix.timezone }}
+      DATABASE_URL: ''
+      AI_API_KEY: ''
+      FORECAST_API_URL: ''
+      TEST_DATABASE_URL: postgresql://allen_test_user:local_test_only@127.0.0.1:5432/allen_test_research
+    steps:
+      - name: 读取当前分支
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: 准备 Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: 安装依赖
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: 检查测试文件语法
+        run: node --check tests/postgres-integration.mjs
+
+      - name: 使用临时 PostgreSQL 验证研究记录
+        run: node --test tests/postgres-integration.mjs
