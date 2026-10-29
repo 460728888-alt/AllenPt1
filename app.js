@@ -617,9 +617,9 @@ function wbHistoricalStudy(report,error=''){
 
 async function validationPage(){
  $('#content').innerHTML='<div class="wb-loading">正在读取验证状态…</div>';
- const owner=currentUser;
+ const owner=currentUser,validationEpoch=state.wbValidationEpoch=(state.wbValidationEpoch||0)+1;
  const [data,study]=await Promise.all([wbLoad('validation'),api('/api/validation/five-session').then(value=>({report:value.report})).catch(error=>({error:error.message||'请求失败'}))]);
- if(!data||currentUser!==owner||state.page!=='validation')return;
+ if(!data||currentUser!==owner||state.page!=='validation'||state.wbValidationEpoch!==validationEpoch)return;
  $('#content').innerHTML=wbHeader('ALLEN / VALIDATION','验证与限制','先核对数据与规则，再看扣费后表现和回撤；不按最高胜率挑模型。')+
  '<section class="wb-validation-hero"><span class="wb-state">研究可继续 · 收益优势未证明</span><h2>我们目前知道什么？</h2><p>可靠性测试检查数据、计算、保存和界面行为，不证明策略赚钱。正式短期策略、成交规则和风险预算仍待确定。</p></section><div class="wb-validation-grid">'+
  [['01','预测目标','上涨、跑赢基准、先止盈后止损是三个不同目标；尚未确认目标时不混成一个概率。'],

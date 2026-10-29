@@ -78,3 +78,19 @@ test('unreadable or non-historical studies never become zero-return or no-opport
  assert.match(html,/来源失配/);assert.match(html,/不能据此判断没有机会/);
  assert.ok(!html.includes('<table'));
 });
+
+test('an older delayed study response cannot overwrite a newer validation-page render',async()=>{
+ const {nodes,run}=setup();
+ run("state.page='validation';globalThis.studyQueue=[];globalThis.baseApi=api;api=url=>url==='/api/validation/five-session'?new Promise((resolve,reject)=>studyQueue.push({resolve,reject})):baseApi(url)");
+ const older=run('validationPage()');
+ await new Promise(resolve=>setTimeout(resolve,0));
+ const newer=run('validationPage()');
+ await new Promise(resolve=>setTimeout(resolve,0));
+ run("studyQueue[1].reject(Error('较新请求故障，等待复核'))");
+ await newer;
+ const expected=nodes.get('#content').innerHTML;
+ assert.ok(expected.includes('较新请求故障，等待复核'));
+ run("studyQueue[0].reject(Error('较旧请求，不能覆盖'))");
+ await older;
+ assert.equal(nodes.get('#content').innerHTML,expected);
+});
