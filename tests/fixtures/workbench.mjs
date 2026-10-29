@@ -8,7 +8,7 @@ export function demoData(){
     levels,strategy:{version:'range20-t1-review-1',qualified:null,t2Enabled:false},
     profile:{usefulPullback:true,pullbackPct:-12.4,volumeDriedUp:true,volumeDryRatio:.68,
       priceTight:true,lowsStoppedFalling:true},
-    structure:{levels,evidence:{compression:true,lowsRising:true},range:{widthPct:8.1},
+    structure:{stage:'横盘蓄势',levels,evidence:{compression:true,lowsRising:true},range:{widthPct:8.1},
       volume:{ratio:.76,recentRatio:.68}},evidence:{source:'synthetic-demo-only'}
   };
   const current={...original,price:11.9,dataThrough:'2026-10-14',data:{...original.data,dataThrough:'2026-10-14'}};
@@ -17,7 +17,7 @@ export function demoData(){
   const paused={...original,symbol:'DEMO-C.SS',code:'DEMO-C',name:'演示·缺量样本C'};
   const gap={...paused,price:null,dataThrough:'2026-10-14',data:{state:'insufficient',dataThrough:'2026-10-14',reasons:['演示：成交量缺失']}};
   const fourth={...original,symbol:'DEMO-D.SS',code:'DEMO-D',name:'演示·触发样本D'};
-  const trigger={...fourth,price:12.1,dataThrough:'2026-10-14',data:{...original.data,dataThrough:'2026-10-14'},structure:{...original.structure,volume:{ratio:1.6}}};
+  const trigger={...fourth,price:12.1,dataThrough:'2026-10-14',data:{...original.data,dataThrough:'2026-10-14'},structure:{...original.structure,stage:'向上突破待确认',volume:{ratio:1.6}}};
   const event=(id,kind,date,snapshot,status,note)=>({id,kind,data_through:date,occurred_at:date+'T08:00:00Z',payload:{snapshot,status,...(note?{note}:{})}});
   const records=[
     {researchId:'DEMO-RESEARCH-A',original,events:[

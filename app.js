@@ -376,7 +376,7 @@ function wbHeader(kicker,title,detail,actions=''){
 function wbStatus(data){
  const scan=wb().scanState(data.scan,data.errors.scan),c=wb().coverage(data.scan);
  const stale=data.scan&&data.context.verified&&c.range?.[0]<data.context.expectedThrough;
- return '<section class="wb-data-strip" role="status"><div><span class="wb-state '+esc(scan.key)+'">'+esc(stale?'历史扫描·待刷新':scan.label)+'</span><b>数据截止 '+esc(c.range?.join(' 至 ')||'未记录')+'</b></div><p>上次扫描：请求 '+wbValue(c.requested,0)+' · 返回 '+wbValue(c.returned,0)+' · 失败 '+wbValue(c.failed,0)+' · 可判断 '+wbValue(c.usable,0)+'（'+wbValue(c.pct,1)+'%）</p><small>应有完整日线 '+esc(data.context.expectedThrough||'待核验')+' · 保存于 '+esc(wbDate(data.scan?.createdAt))+'</small><details><summary>查看范围、失败原因与限制</summary><p>'+esc(scan.detail)+'</p><p>结构观察 '+wbValue(c.observations,0)+' 条；本次展示 '+c.displayed+' 条。原有筛选最多展示60条，研究历史入口返回最近200条；均不代表全市场。</p><p>合格候选：未判定。T1＋1.5 配置不兼容，T2 未启用；结构观察单独保留。</p>'+
+ return '<section class="wb-data-strip" role="status">'+(data.scan&&data.scan.storage?.durable!==true?'<p class="wb-warning">本次扫描保存状态未确认；研究档案只使用实际留档，不补造历史。</p>':'')+'<div><span class="wb-state '+esc(scan.key)+'">'+esc(stale?'历史扫描·待刷新':scan.label)+'</span><b>数据截止 '+esc(c.range?.join(' 至 ')||'未记录')+'</b></div><p>上次扫描：请求 '+wbValue(c.requested,0)+' · 返回 '+wbValue(c.returned,0)+' · 失败 '+wbValue(c.failed,0)+' · 可判断 '+wbValue(c.usable,0)+'（'+wbValue(c.pct,1)+'%）</p><small>应有完整日线 '+esc(data.context.expectedThrough||'待核验')+' · 保存于 '+esc(wbDate(data.scan?.createdAt))+'</small><details><summary>查看范围、失败原因与限制</summary><p>'+esc(scan.detail)+'</p><p>结构观察 '+wbValue(c.observations,0)+' 条；本次展示 '+c.displayed+' 条。原有筛选最多展示60条，研究历史入口返回最近200条；均不代表全市场。</p><p>合格候选：未判定。T1＋1.5 配置不兼容，T2 未启用；结构观察单独保留。</p>'+
  c.failures.slice(0,15).map(f=>'<p>'+esc(f.symbol||'数据源')+' · '+esc(f.code||'原因未知')+' · '+esc(f.message||'未记录')+'</p>').join('')+
  Object.entries(data.errors).map(([name,message])=>'<p class="wb-warning">'+esc(({scan:'量价记录',history:'研究历史',events:'事件记录',context:'时效核验',model:'模型状态'})[name])+'：'+esc(message)+'</p>').join('')+
  (c.failures.length>15?'<p>另有 '+(c.failures.length-15)+' 条；请到量价筛选查看完整原因。</p>':'')+'</details></section>';
@@ -393,11 +393,20 @@ function wbInvalidation(item){
  const stop=item.original?.levels?.stop??item.levels?.stop;
  return '有效完整日线收盘 ≤ '+wbPrice(stop)+'，结束原结构假设；数据缺失不判失效。止损条件不保证能按该价成交。';
 }
+function wbStatusText(value){return ({tracking:'持续跟踪',review:'需要复核',invalidated:'已失效',closed:'研究已结束',expired:'已到期'})[value]||'状态待核验'}
+function wbEventText(value){return ({created:'首次发现',refreshed:'更新观察',data_gap:'数据缺口',invalidated:'失效／到期',note:'复核笔记'})[value]||'追加观察'}
+function wbMiniChart(item){
+ const a=item.original,b=item;
+ if(!item.observationSaved||!a||a.data?.state!=='ok'||b.data?.state!=='ok'||!Number.isFinite(a.price)||!Number.isFinite(b.price)||!(a.price>0&&b.price>0)||!wb().date(a.dataThrough)||!wb().date(b.dataThrough)||a.dataThrough>=b.dataThrough)
+   return '<div class="wb-mini-observations"><small>最新观察 '+wbPrice(b.price)+' · '+esc(b.dataThrough||'截止未知')+'</small><small>历史价格点不足，未生成示意走势。</small></div>';
+ const rise=b.price>=a.price,y1=rise?29:7,y2=rise?7:29;
+ return '<div class="wb-mini-observations"><div><span>原始 '+wbPrice(a.price)+' <small>'+esc(a.dataThrough)+'</small></span><svg viewBox="0 0 120 36" aria-label="仅原始与最新两个价格观测点"><line x1="8" y1="'+y1+'" x2="112" y2="'+y2+'"/><circle cx="8" cy="'+y1+'" r="3"/><circle cx="112" cy="'+y2+'" r="3"/></svg><span>最新 '+wbPrice(b.price)+' <small>'+esc(b.dataThrough)+'</small></span></div><small>仅比较两次留档观测，不是每日走势或收益。</small></div>';
+}
 function wbCard(item,compact=false){
  const facts=wb().facts(item),support=facts.filter(x=>x.state==='supported');
  const note=item.channel==='radar'?(item.rationale||item.original?.rationale||'公告线索待核验'):
    support.length?support.map(x=>x.title).slice(0,2).join('、')+'有留档依据；上涨趋势仍需先核验。':'原扫描证据不完整，先核对条件。';
- return '<article class="wb-opportunity '+esc(item.phase.key)+(compact?' compact':'')+'" data-wb-card="'+esc(item.viewId)+'"><div class="wb-card-top"><span class="wb-stage">'+esc(item.phase.label)+'</span><span>'+esc(item.channel==='radar'?'事件渠道':'量价渠道')+'</span></div><h3>'+esc(item.name||item.symbol)+' <small>'+esc(item.code||item.symbol)+'</small></h3><p class="wb-card-reason">'+esc(note)+'</p><dl><dt>还差什么</dt><dd>'+esc(wbCondition(item))+'</dd><dt>首要疑点</dt><dd>'+esc(item.channel==='radar'?'事件利好尚不能证明价格确认或未来收益。':facts[0].basis)+'</dd><dt>何时放弃</dt><dd>'+esc(wbInvalidation(item))+'</dd></dl><div class="wb-card-foot"><small>'+esc(item.dataThrough||'截止未知')+' · '+esc(item.quality.label)+'</small><button class="wb-link" data-wb-open="'+esc(item.viewId)+'">研究档案 →</button></div></article>';
+ return '<article class="wb-opportunity '+esc(item.phase.key)+(compact?' compact':'')+'" data-wb-card="'+esc(item.viewId)+'"><div class="wb-card-top"><span class="wb-stage">'+esc(item.phase.label)+'</span><span>'+esc(item.channel==='radar'?'事件渠道':'量价渠道')+'</span></div><h3>'+esc(item.name||item.symbol)+' <small>'+esc(item.code||item.symbol)+'</small></h3>'+wbMiniChart(item)+'<p class="wb-card-reason">'+esc(note)+'</p><dl><dt>还差什么</dt><dd>'+esc(wbCondition(item))+'</dd><dt>首要疑点</dt><dd>'+esc(item.channel==='radar'?'事件利好尚不能证明价格确认或未来收益。':facts[0].basis)+'</dd><dt>何时放弃</dt><dd>'+esc(wbInvalidation(item))+'</dd></dl><div class="wb-card-foot"><small>'+esc(item.dataThrough||'截止未知')+' · '+esc(item.quality.label)+'</small><button class="wb-link" data-wb-open="'+esc(item.viewId)+'">研究档案 →</button></div></article>';
 }
 function wbEventChannel(data){
  const report=data.events?.[0],ideas=report?.candidates||[];
@@ -407,7 +416,7 @@ function wbEventChannel(data){
  '<small>这里只显示最近报告的前3条线索；全部候选、排除理由和失败情况保留在原雷达。</small></section>';
 }
 function wbRiskRail(data){
- const risks=data.cards.filter(c=>['invalid','paused'].includes(c.phase.key)||c.researchStatus==='review');
+ const risks=data.cards.filter(c=>['invalid','paused'].includes(c.phase.key)||c.researchStatus==='review').sort((a,b)=>(a.phase.key==='invalid'?0:a.researchStatus==='review'?1:2)-(b.phase.key==='invalid'?0:b.researchStatus==='review'?1:2)||String(a.symbol).localeCompare(String(b.symbol)));
  return '<section class="wb-panel wb-risk-rail"><div class="wb-section-title"><div><span class="wb-overline">先处理风险</span><h3>需要复核 '+risks.length+' 条</h3></div><span aria-hidden="true">↗</span></div>'+
  (risks.slice(0,4).map(item=>'<button class="wb-risk-row" data-wb-open="'+esc(item.viewId)+'"><span class="wb-risk-icon">'+(item.phase.key==='invalid'?'×':'!')+'</span><span><b>'+esc(item.name||item.symbol)+'</b><small>'+esc(item.phase.reason)+'</small></span><em>'+esc(item.phase.label)+'</em></button>').join('')||'<p>当前返回记录中没有待复核条目；这不代表持仓没有风险。</p>')+
  '<p class="wb-budget">个人风险预算 <b>待设置</b><small>未生成个人仓位建议。</small></p></section>';
@@ -433,11 +442,15 @@ async function evolutionPage(){
 function wbRenderEvolution(data){
  const stages=['trend','pullback','compression','trigger','follow'],filter=state.wbFilter||'all';
  const shown=data.cards.filter(item=>filter==='all'||item.phase.key===filter);
+ const populated=stages.filter(key=>shown.some(c=>c.phase.key===key));
+ const visible=filter==='all'?populated:stages.filter(key=>filter===key);
+ const absent=stages.filter(key=>!populated.includes(key));
  $('#content').innerHTML=wbHeader('ALLEN / EVOLUTION MAP','机会演化图','阶段可以倒退、暂停、到期和失效；走到最后不表示盈利。',
  '<button class="wb-button secondary" data-wb-refresh>刷新记录</button><button class="wb-button primary" data-go="volumeScreen">量价筛选 →</button>')+
  '<div class="wb-stage-principle"><b>先后关系必须有证据</b><p>上涨趋势、缩量回调、收窄整理、放量突破、后续验证是待检验路径。旧扫描未留存完整顺序，所以当前没有“整套策略已确认”的绿色通行证。</p></div>'+
  wbStatus(data)+'<div class="wb-filter" role="group" aria-label="机会阶段筛选">'+[['all','全部'],...Object.entries(wb().labels).filter(([k])=>k!=='event')].map(([key,name])=>'<button aria-pressed="'+(filter===key)+'" class="'+(filter===key?'active':'')+'" data-wb-filter="'+key+'">'+name+' <small>'+data.cards.filter(c=>key==='all'||c.phase.key===key).length+'</small></button>').join('')+'</div>'+
- '<div class="wb-board">'+stages.filter(key=>filter==='all'||filter===key).map((key,index)=>'<section class="wb-lane"><div class="wb-lane-heading"><span>'+String(index+1).padStart(2,'0')+'</span><h3>'+esc(wb().labels[key])+'</h3><b>'+shown.filter(c=>c.phase.key===key).length+'</b></div>'+shown.filter(c=>c.phase.key===key).map(item=>wbCard(item,true)).join('')+(!shown.some(c=>c.phase.key===key)?'<p class="wb-lane-empty">没有已记录候选，继续等待。</p>':'')+'</section>').join('')+'</div>'+
+ '<p class="wb-muted">有记录的阶段优先展开；这不是必须按顺序完成的盈利路径。</p><div class="wb-board">'+visible.map(key=>'<section class="wb-lane"><div class="wb-lane-heading"><span aria-hidden="true">'+esc(({trend:'◇',pullback:'↘',compression:'≈',trigger:'↗',follow:'◌'})[key])+'</span><h3>'+esc(wb().labels[key])+'</h3><b>'+shown.filter(c=>c.phase.key===key).length+'</b></div>'+shown.filter(c=>c.phase.key===key).map(item=>wbCard(item,true)).join('')+(!shown.some(c=>c.phase.key===key)?'<p class="wb-lane-empty">没有已记录候选，继续等待。</p>':'')+'</section>').join('')+'</div>'+
+ (filter==='all'&&absent.length?'<details class="wb-absent-stages"><summary>查看尚无记录的阶段（'+absent.length+'）</summary><div>'+absent.map(key=>'<section><b>'+esc(wb().labels[key])+'</b><p>没有已留档候选；继续等待或补齐证据。</p></section>').join('')+'</div></details>':'')+
  ['paused','invalid'].filter(key=>filter==='all'||filter===key).map(key=>'<section class="wb-ended"><div class="wb-section-title"><h3>'+esc(wb().labels[key])+' · 保留全部返回记录</h3><b>'+shown.filter(c=>c.phase.key===key).length+'</b></div><div class="wb-ended-grid">'+shown.filter(c=>c.phase.key===key).map(item=>wbCard(item,true)).join('')+'</div></section>').join('')+
  wbEventChannel(data)+disclaimer();
 }
@@ -477,7 +490,7 @@ async function researchArchivePage(){
 function wbRenderArchive(){
  const record=state.archiveRecord,view=wb().asOf(record,state.archiveMode),snapshot=view.snapshot,original=record.original,levels=original.levels||{},later=view.mode==='later';
  const name=original.name||original.symbol,through=snapshot.dataThrough||snapshot.data?.dataThrough||'未记录';
- const phase=later?record.events?.at(-1)?.payload?.status:'当时原始快照';
+ const phase=later?wbStatusText(record.events?.at(-1)?.payload?.status):'当时原始快照';
  $('#content').innerHTML=wbHeader('ALLEN / RESEARCH ARCHIVE',name+' · 研究档案','同一股票的新机会使用不同研究编号；原始条件固定，变化只追加。',
  '<button class="wb-button secondary" data-go="evolution">← 演化图</button><button class="wb-button primary" data-stock="'+esc(original.symbol)+'" data-name="'+esc(name)+'">完整公司研究 →</button>')+
  '<section class="wb-archive-title"><div><span class="wb-state">'+esc(later?'后来记录 · 非实盘收益':'真实留档 · 当时判断')+'</span><p>研究编号 '+esc(record.researchId)+'</p><small>生成 '+esc(wbDate(record.generatedAt))+' · 数据截止 '+esc(through)+'</small></div><div class="wb-time-switch" role="group" aria-label="研究时间切换"><button aria-pressed="'+!later+'" data-wb-time="original">回到当时</button><button aria-pressed="'+later+'" data-wb-time="later">后来记录与结果</button></div></section>'+
@@ -486,10 +499,10 @@ function wbRenderArchive(){
  wbChart(record,view.mode)+'<div class="wb-chart-markers"><button data-wb-marker="original">● '+esc(original.dataThrough||'日期未知')+' 原始判断</button>'+
  view.events.map((event,i)=>'<button data-wb-marker="'+i+'">'+esc(event.data_through||'日期未知')+' · '+esc(({created:'首次发现',refreshed:'更新观察',data_gap:'数据缺口',invalidated:'失效／到期',note:'复核笔记'})[event.kind]||event.kind)+'</button>').join('')+'</div></article>'+
  '<section class="wb-panel wb-evidence"><div class="wb-section-title"><h3>支持证据与疑点</h3><span>点击查看具体计算依据</span></div><div class="wb-fact-grid">'+wbFactRows(snapshot)+'</div></section>'+
- (later?'<section class="wb-panel"><h3>追加记录 · 包含失败与未验证状态</h3>'+view.events.map(event=>'<article class="wb-history-row"><time>'+esc(wbDate(event.occurred_at))+'</time><div><b>'+esc(event.kind)+' · '+esc(event.payload?.status||'未记录')+'</b><p>'+esc(event.payload?.note||'行情与条件观察；未记录成交或策略收益')+'</p><small>数据截止 '+esc(event.data_through||'未记录')+'</small></div></article>').join('')+
+ (later?'<section class="wb-panel"><h3>追加记录 · 包含失败与未验证状态</h3>'+view.events.map(event=>'<article class="wb-history-row"><time>'+esc(wbDate(event.occurred_at))+'</time><div><b>'+esc(wbEventText(event.kind))+' · '+esc(wbStatusText(event.payload?.status))+'</b><p>'+esc(event.payload?.note||'行情与条件观察；未记录成交或策略收益')+'</p><small>数据截止 '+esc(event.data_through||'未记录')+'</small></div></article>').join('')+
  '<form class="wb-note" data-id="'+esc(record.researchId)+'" data-request="'+crypto.randomUUID()+'"><label for="wbNote">追加复核笔记</label><textarea id="wbNote" name="note" maxlength="1000" required placeholder="新证据是什么？原判断需要怎样调整？"></textarea><button class="wb-button primary" type="submit">追加保存</button><p class="wb-note-status" role="status"></p></form></section>':
  '<section class="wb-panel"><h3>当时笔记</h3><p>原始快照未包含生成时的用户笔记。后续追加笔记只在“后来记录与结果”中展示。</p></section>')+
- '</section><aside><section class="wb-panel wb-original-plan"><span class="wb-overline">原始条件 · 不随扫描漂移</span><h3>确认与放弃</h3><dl><dt>原入场参考</dt><dd>'+wbPrice(levels.entry)+'</dd><dt>原突破参考</dt><dd>'+wbPrice(levels.breakout)+'</dd><dt>原始失效价</dt><dd>'+wbPrice(levels.stop)+'</dd><dt>T1 结构参考</dt><dd>'+wbPrice(levels.target1)+'</dd><dt>原 RR1</dt><dd>'+wbValue(levels.rr1,4)+'</dd></dl><p>'+esc(wbCondition({...original,phase:{key:'original'}}))+'</p><p class="wb-warning">'+esc(wbInvalidation({original,channel:state.archiveItem?.channel}))+'</p><small>T1是结构参考，不是收益承诺。T2未启用，正式资格未判定。跳空、跌停、停牌或T+1可能影响退出。</small><div class="wb-budget">风险预算 <b>待设置</b></div></section>'+
+ '</section><aside><section class="wb-panel wb-original-plan"><span class="wb-overline">原始条件 · 不随扫描漂移</span><h3>确认与放弃</h3><dl><dt>原入场参考</dt><dd>'+wbPrice(levels.entry)+'</dd><dt>原突破参考</dt><dd>'+wbPrice(levels.breakout)+'</dd><dt>原始失效价</dt><dd>'+wbPrice(levels.stop)+'</dd><dt>T1 结构参考</dt><dd>'+wbPrice(levels.target1)+'</dd><dt>原风险收益比 RR1</dt><dd>'+wbValue(levels.rr1,4)+'</dd></dl><p>'+esc(wbCondition({...original,phase:{key:'original'}}))+'</p><p class="wb-warning">'+esc(wbInvalidation({original,channel:state.archiveItem?.channel}))+'</p><small>T1是结构参考，不是收益承诺。T2未启用，正式资格未判定。跳空、跌停、停牌或T+1可能影响退出。</small><div class="wb-budget">风险预算 <b>待设置</b></div></section>'+
  '<section class="wb-panel wb-provenance"><h3>原始记录凭据</h3><p>策略版本 '+esc(record.strategyVersion||'未记录')+'</p><p>价格定义 '+esc(record.calculationVersion||'未记录')+'</p><p>扫描编号 '+esc(record.sourceScanId||'未记录')+'</p><small>快照校验通过</small><code>'+esc(record.snapshotHash)+'</code></section>'+
  '<section class="wb-panel"><h3>连接公司、财务与行业</h3><p>最新资料单独标注读取时间，不混入当时判断。</p><button class="wb-button secondary" data-wb-context>读取当前公司资料</button><div id="wbCurrentContext">'+(state.archiveContext?wbCurrentContextHtml(state.archiveContext):'')+'</div></section></aside></div>'+disclaimer();
 }

@@ -179,3 +179,19 @@
  .wb-evidence-dialog h2{font-size:21px}.wb-archive-grid>aside .wb-panel{margin-bottom:16px}
 }
 @media(prefers-reduced-motion:reduce){.workbench-mode *{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+.workbench-mode .brand b{font-size:13px;white-space:nowrap}
+.wb-mini-observations{border-top:1px solid #eef1f5;border-bottom:1px solid #eef1f5;padding:10px 0;margin:0 0 14px}
+.wb-mini-observations>div{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.wb-mini-observations span{font-size:10px;color:#55728f}
+.wb-mini-observations span small{display:block;font-size:8px;color:#97a4b3;margin-top:4px}
+.wb-mini-observations svg{width:85px;height:32px;flex-shrink:0}
+.wb-mini-observations line{stroke:#6b8aa8;stroke-width:1.5;stroke-dasharray:4 3}
+.wb-mini-observations circle{fill:white;stroke:#5c7d9f;stroke-width:1.5}
+.wb-mini-observations>small{display:block;font-size:8px;color:#8798a9;line-height:1.6;margin-top:5px}
+.wb-absent-stages{border:1px dashed #cbd7e3;border-radius:10px;padding:13px 16px;margin:2px 0 20px;color:#71869d;font-size:11px}
+.wb-absent-stages summary{cursor:pointer;font-weight:650}
+.wb-absent-stages>div{display:flex;gap:15px;flex-wrap:wrap;padding-top:15px}
+.wb-absent-stages section{flex:1;min-width:160px;padding:12px;background:#edf2f7;border-radius:7px}
+.wb-absent-stages b{font-size:11px;color:#5d7792}
+.wb-absent-stages p{font-size:10px;line-height:1.7}

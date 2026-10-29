@@ -29,7 +29,7 @@ test('simultaneous positive fields cannot invent a prior uptrend or confirmed st
   assert.equal(facts.find(x=>x.id==='trend').state,'unknown');
   assert.equal(facts.find(x=>x.id==='volume').state,'supported');
   assert.equal(W.stage(snapshot,data.context).key,'compression');
-  const trigger={...snapshot,price:12.1,structure:{...snapshot.structure,volume:{ratio:1.6}}};
+  const trigger={...snapshot,price:12.1,structure:{...snapshot.structure,stage:'向上突破待确认',volume:{ratio:1.6}}};
   assert.equal(W.stage(trigger,data.context).key,'trigger');
   assert.match(W.stage(trigger,data.context).label,/待确认/);
 });
@@ -73,4 +73,28 @@ test('sparse observation chart excludes missing prices without fabricating daily
 test('event evidence is kept separate from price confirmation',()=>{
   const data=demoData(),item={...data.records[0].events[2].payload.snapshot,channel:'radar'};
   assert.equal(W.stage(item,data.context).key,'event');
+});
+
+test('a new observation with unconfirmed saving is never labelled a persisted chart point',()=>{
+ const data=demoData();data.scan.storage={durable:false,state:'unavailable'};
+ const rows=W.cards(data.scan,data.history,data.context);
+ assert.equal(rows.find(row=>row.viewId==='DEMO-RESEARCH-A').observationSaved,false);
+ assert.equal(rows.find(row=>row.viewId==='DEMO-RESEARCH-B').observationSaved,true);
+});
+
+test('rounded display volume cannot create a breakout absent the original unrounded judgment',()=>{
+ const data=demoData(),snapshot=data.records[3].events[1].payload.snapshot;
+ const rounded={...snapshot,structure:{...snapshot.structure,stage:'上沿试探',volume:{ratio:1.5}}};
+ assert.equal(W.facts(rounded).find(f=>f.id==='trigger').state,'contrary');
+ assert.notEqual(W.stage(rounded,data.context).key,'trigger');
+});
+test('incomparable price scales pause the phase; an unrecorded threshold crossing only requests review',()=>{
+ const data=demoData(),snapshot=data.records[0].events[2].payload.snapshot;
+ assert.equal(W.stage({...snapshot,originalComparable:false},data.context).key,'paused');
+ assert.equal(W.stage({...snapshot,original:data.records[0].original,price:9.8,researchStatus:'tracking'},data.context).key,'follow');
+});
+test('an ok flag with a missing current price cannot produce a usable phase',()=>{
+ const data=demoData(),snapshot={...data.records[0].events[2].payload.snapshot,price:null};
+ assert.equal(W.quality(snapshot,data.context).state,'insufficient');
+ assert.equal(W.stage(snapshot,data.context).key,'paused');
 });

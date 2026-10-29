@@ -12,6 +12,7 @@
   function quality(snapshot={},context={}){
     const state=snapshot.data?.state,through=snapshot.dataThrough||snapshot.data?.dataThrough;
     if(!date(through))return {state:'insufficient',label:'数据截止未知',reason:'缺少有效数据截止日期'};
+    if(state==='ok'&&!(number(snapshot.price)>0))return {state:'insufficient',label:'价格待核验',reason:'有效价格缺失，暂停当前阶段判断'};
     if(state!=='ok')return {state:state||'insufficient',label:state==='stale'?'数据过期':state==='request_failed'?'请求失败':'数据不足',
       reason:(snapshot.data?.reasons||[]).join('；')||'数据质量未通过，暂停新的确认与失效判断'};
     if(!context.verified||!date(context.expectedThrough))return {state:'unverified',label:'时效待核验',reason:'交易日历或服务状态尚未核验，不能把留档行情当作当前行情'};
@@ -21,7 +22,7 @@
   }
   function facts(snapshot={}){
     const p=snapshot.profile||{},s=snapshot.structure||{},e=s.evidence||snapshot.evidence||{},v=s.volume||{},levels=snapshot.levels||s.levels||{};
-    const through=snapshot.dataThrough||snapshot.data?.dataThrough||null,validData=snapshot.data?.state==='ok';
+    const through=snapshot.dataThrough||snapshot.data?.dataThrough||null,validData=snapshot.data?.state==='ok'&&number(snapshot.price)>0;
     const fact=(id,title,passed,value,basis)=>({id,title,state:!validData?'unknown':passed===true?'supported':passed===false?'contrary':'unknown',value:validData?value:null,basis,dataThrough:through,
       source:'原始扫描字段；'+(snapshot.strategy?.version||'策略版本未留存')});
     return [
@@ -35,9 +36,8 @@
       fact('lows','低点未继续下移',typeof p.lowsStoppedFalling==='boolean'?p.lowsStoppedFalling:typeof e.lowsRising==='boolean'?e.lowsRising:null,null,
         '最近10根最低价 ≥ 前10根最低价 × 0.995。仅解释旧观察条件，不保证后续上涨。'),
       fact('trigger','价格与量能触发',
-        number(snapshot.price)!==null&&number(levels.breakout)!==null&&number(v.ratio)!==null?
-          snapshot.price>=levels.breakout&&v.ratio>=1.5:null,number(v.ratio),
-        '完整日线收盘价 ≥ 此前20根上沿 × 1.003（按报价单位向上处理），且当日成交量 / 此前20根均量 ≥ 1.5。触发不等于策略有效或可成交。')
+        typeof s.stage==='string'&&s.stage?s.stage==='向上突破待确认':null,number(v.ratio),
+        '完整日线收盘价 ≥ 此前20根上沿 × 1.003（按报价单位向上处理），且当日成交量 / 此前20根均量 ≥ 1.5。图示量比已取整，仅作显示；触发状态使用当时未取整判断的原始阶段字段，不重新拿显示值判定。触发不等于策略有效或可成交。')
     ];
   }
   function stage(item={},context={}){
@@ -46,7 +46,9 @@
     if(['closed','expired'].includes(status))return {key:'follow',label:status==='expired'?'研究已到期':'研究已结束',reason:'等待复盘；完成或到期均不代表盈利'};
     const q=quality(item,context);
     if(item.latestKind==='data_gap'||q.state!=='ok')return {key:'paused',label:labels.paused,reason:q.reason};
+    if(item.originalComparable===false)return {key:'paused',label:labels.paused,reason:'原始与最新价格尺度不可直接比较，暂停确认与失效判断'};
     if(item.channel==='radar')return {key:'event',label:labels.event,reason:'公告线索与价格确认分别核验'};
+    if(item.structure?.stage==='结构失效'||number(item.price)>0&&number(item.original?.levels?.stop)>0&&item.price<=item.original.levels.stop)return {key:'follow',label:'原判断需复核',reason:'最新价格或区间需复核；原研究是否失效以已留档事件为准，不补造结论'};
     if(status==='review')return {key:'follow',label:'原判断需复核',reason:'查看追加记录，核对新的支持与反面证据'};
     const f=facts(item);
     if(f.find(x=>x.id==='trigger').state==='supported')return {key:'trigger',label:labels.trigger,reason:'仅价格与量能条件触发；先前趋势、阶段顺序及收益优势仍待验证'};
@@ -63,7 +65,7 @@
         ...latest,symbol:record.symbol,name:record.name||latest.name,
         researchId:record.researchId,original:record.original,snapshotHash:record.snapshotHash,
         generatedAt:record.firstSeenAt,strategyVersion:record.strategyVersion,
-        researchStatus:record.status,latestKind:record.latestKind,channel:record.channel||'volume'
+        researchStatus:record.status,latestKind:record.latestKind,channel:record.channel||'volume',observationSaved:true
       });
     }
     for(const raw of [...(scan?.items||[]),...(scan?.retained||[])]){
@@ -73,7 +75,7 @@
       byId.set(id,useOld?old:{...old,...raw,
         original:old?.original||raw.original,
         researchStatus:old?.researchStatus||raw.researchStatus,
-        latestKind:old?.latestKind||raw.latestKind,channel:old?.channel||'volume',
+        latestKind:old?.latestKind||raw.latestKind,channel:old?.channel||'volume',observationSaved:scan?.storage?.durable===true,
         researchId:raw.researchId||null,viewId:id});
     }
     const rank={trigger:0,compression:1,pullback:2,trend:3,follow:4,event:5,paused:6,invalid:7};
