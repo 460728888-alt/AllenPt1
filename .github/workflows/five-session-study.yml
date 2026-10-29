@@ -1,0 +1,50 @@
+name: 五日规则真实数据研究
+on:
+  push:
+    branches: [upgrade/opportunity-workbench-v2]
+    paths:
+      - research/five-session-protocol.json
+      - historical-rule-study.js
+      - historical-rule-study.test.js
+      - scripts/run-five-session-study.mjs
+      - .github/workflows/five-session-study.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  study:
+    if: github.ref == 'refs/heads/upgrade/opportunity-workbench-v2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ''
+      AI_API_KEY: ''
+      FORECAST_API_URL: ''
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - name: 安装固定依赖
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: 验证研究模块
+        run: node --test historical-rule-study.test.js
+      - name: 固定协议后读取免费历史日线
+        run: |
+          set -euo pipefail
+          mkdir -p test-logs
+          node scripts/run-five-session-study.mjs 2>&1 | tee test-logs/five-session-study.log
+      - name: 保存真实来源、失败和重建研究
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Allen-five-session-real-data-study
+          path: |
+            test-results/five-session-study/
+            test-logs/five-session-study.log
+            research/five-session-protocol.json
+          if-no-files-found: warn
+          retention-days: 7
