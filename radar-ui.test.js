@@ -45,8 +45,8 @@ test('personal scenario calculates both-side fees and leaves unknown target unav
  const {run}=setup();run("state.portfolio=[{symbol:'001',buy:10,qty:100}];state.feeSettings={commissionRatePer10000:0,minimumCommission:5,stampDutyRatePer10000:0,transferFeeRatePer10000:0}");
  const html=run("costView({symbol:'001',price:11,tradePlan:{}})");assert.match(html,/90\.00/);assert.match(html,/暂无/);
 });
-test('home renders new focus sections with an empty account',async()=>{
- const {run,nodes}=setup();run("document.body={classList:{add(){}}};currentUser={username:'one'};state.page='dashboard';state.watch=[];state.portfolio=[];api=async()=>({items:[],changes:[]})");
- await run('dashboard()');const html=nodes.get('#content').innerHTML;
+test('classic overview remains available with an empty account',async()=>{
+ const {run,nodes}=setup();run("document.body={classList:{add(){}}};currentUser={username:'one'};state.page='legacyDashboard';state.watch=[];state.portfolio=[];api=async()=>({items:[],changes:[]})");
+ await run('legacyDashboard()');const html=nodes.get('#content').innerHTML;
  assert.match(html,/今天最值得复核的3条变化/);assert.match(html,/机会时间地图/);assert.match(html,/我的成本视角/);assert.match(html,/暂无已记录变化/);
 });

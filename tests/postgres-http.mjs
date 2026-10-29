@@ -418,6 +418,103 @@ await test('real site restart, failure notices and backup export',{
           assert.deepEqual(errors,[]);
         }finally{await context.close()}
       });
+
+      await t.test('new workbench uses real history, replay and append-only note endpoints',async()=>{
+        const {context,page,errors}=await openPage(1194,834,'observe');
+        try{
+          await page.route('**/api/workbench/context',route=>route.fulfill({json:{
+            verified:true,expectedThrough:'2026-10-12',calendarSource:'synthetic-test-only',riskBudget:null
+          }}));
+          await page.reload({waitUntil:'networkidle'});
+          await page.locator('.wb-hero').waitFor();
+          assert.match(await page.locator('#content').innerText(),/风险预算/);
+          await page.locator('.wb-hero [data-wb-open]').click();
+          await page.locator('.wb-archive-grid').waitFor();
+          assert.ok(!(await page.locator('#content').innerText()).includes('合成测试笔记：不是投资判断'));
+          await page.locator('[data-wb-marker="original"]').click();
+          await page.locator('#wbEvidence').waitFor({state:'visible'});
+          assert.match(await page.locator('#wbEvidence').innerText(),/缺少|不足|未留存/);
+          await page.keyboard.press('Escape');
+          await page.locator('#wbEvidence').waitFor({state:'detached'});
+          await page.locator('[data-wb-time="later"]').click();
+          await page.getByText('合成测试笔记：不是投资判断',{exact:true}).waitFor();
+          await page.locator('#wbNote').fill('新研究档案的合成追加笔记');
+          await page.locator('.wb-note button').click();
+          await page.locator('.wb-note-status').filter({hasText:'笔记已追加'}).waitFor();
+          const saved=await json('/api/research-history/'+recordId);
+          assert.deepEqual(saved.original,original);
+          assert.equal(saved.snapshotHash,snapshotHash(original));
+          assert.equal(saved.snapshotVerified,true);
+          assert.ok(saved.generatedAt);assert.ok(saved.strategyVersion);
+          assert.ok(saved.events.some(event=>event.payload.note==='新研究档案的合成追加笔记'));
+          await page.route('**/api/research-history/*/notes',route=>route.fulfill({
+            status:503,json:{error:'合成故障，保存未成功'}
+          }));
+          await page.locator('#wbNote').fill('新界面中故意保存失败的合成笔记');
+          await page.locator('.wb-note button').click();
+          await page.locator('.wb-note-status').filter({hasText:'保存未确认'}).waitFor();
+          assert.equal(await page.locator('.wb-note button').isEnabled(),true);
+          const after=await json('/api/research-history/'+recordId);
+          assert.ok(!after.events.some(event=>event.payload.note==='新界面中故意保存失败的合成笔记'));
+          assert.deepEqual(errors,[]);
+        }finally{await context.close()}
+      });
+      await t.test('standalone synthetic preview demonstrates all three pages and five data states',async()=>{
+        const {buildWorkbenchPreview}=await import('../scripts/build-workbench-preview.mjs');
+        const previewPath=root+'test-results/Allen-opportunity-preview.html';
+        fs.mkdirSync(root+'test-results',{recursive:true});
+        fs.writeFileSync(previewPath,buildWorkbenchPreview());
+        for(const [width,height] of [[1194,834],[390,844],[1440,900]]){
+          const context=await browser.newContext({viewport:{width,height},timezoneId:'Asia/Shanghai'});
+          const page=await context.newPage(),errors=[],remote=[];
+          page.on('pageerror',error=>errors.push(error.message));
+          page.on('request',request=>{if(/^https?:/.test(request.url()))remote.push(request.url())});
+          const capture=async name=>{
+            const dimensions=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
+            assert.ok(dimensions.scroll<=dimensions.width+1,JSON.stringify({name,...dimensions}));
+            await page.screenshot({path:artifacts+width+'-workbench-'+name+'.png',fullPage:true});
+            if(width===1194){
+              const buffer=await page.screenshot({type:'jpeg',quality:60,fullPage:false});
+              console.log('WB_PREVIEW_IMAGE '+name+' '+buffer.toString('base64'));
+            }
+          };
+          try{
+            await page.goto('file://'+previewPath,{waitUntil:'networkidle'});
+            await page.locator('.wb-hero').waitFor();
+            await page.getByText('独立预览 · 全部为虚构演示数据',{exact:true}).waitFor();
+            assert.match(await page.locator('.wb-data-strip').innerText(),/83\.3%/);
+            await capture('home');
+            await page.locator('[data-wb-open="DEMO-RESEARCH-A"]').first().click();
+            await page.locator('.wb-archive-grid').waitFor();
+            assert.ok(!(await page.locator('#content').innerText()).includes('演示：后来追加的复核笔记'));
+            await page.locator('[data-wb-time="later"]').click();
+            await page.getByText('演示：后来追加的复核笔记，不能出现在当时判断中。',{exact:true}).waitFor();
+            await page.locator('[data-wb-marker="1"]').click();
+            await page.locator('#wbEvidence').waitFor({state:'visible'});
+            await page.locator('#wbEvidence').getByText('数据截止 2026-10-13',{exact:true}).waitFor();
+            await page.keyboard.press('Escape');
+            await page.locator('#wbEvidence').waitFor({state:'detached'});
+            await capture('archive');
+            await page.locator('.wb-page-heading [data-go="evolution"]').click();
+            await page.locator('.wb-board').waitFor();
+            await page.locator('.wb-opportunity.invalid').waitFor();
+            await capture('evolution');
+            for(const [scene,label] of [['empty','已核验范围暂无结构观察'],['insufficient','无法完成判断'],['failed','无法完成判断'],['invalid','发现结构观察']]){
+              await page.locator('[data-preview-scene="'+scene+'"]').click();
+              if(scene==='invalid'){
+                await page.locator('.wb-risk-row').filter({hasText:'演示·失效样本B'}).waitFor();
+                assert.ok(!(await page.locator('.wb-candidate-area').innerText()).includes('演示·观察样本A'));
+              }else{
+                await page.locator('.wb-data-strip .wb-state').filter({hasText:label}).waitFor();
+                if(scene==='failed')assert.ok(!(await page.locator('#content').innerText()).includes('已核验范围暂无结构观察'));
+              }
+              await page.screenshot({path:artifacts+width+'-scene-'+scene+'.png',fullPage:true});
+            }
+            assert.deepEqual(errors,[]);assert.deepEqual(remote,[]);
+            browserChecks.push({width,height,mode:'new-workbench-replay-and-five-states',passed:true});
+          }finally{await context.close()}
+        }
+      });
     }
 
     await t.test('database outage is explicit and recovery needs no site restart',async()=>{

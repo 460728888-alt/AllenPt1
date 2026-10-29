@@ -1,7 +1,7 @@
 import {createResearchStore} from './research-store.js';
 import fs from 'node:fs';
 import {loadMarketCalendar} from './market-calendar.js';
-import {finiteNumber,dataError,normalizeDailyChart,failureOf} from './data-contract.js';
+import {finiteNumber,dataError,normalizeDailyChart,failureOf,calendarExpectation} from './data-contract.js';
 import {priceLevels,tradePlanFromLevels,SCREEN_STRATEGY} from './price-levels.js';
 import {guardForecast,probabilityEligibility} from './probability-contract.js';
 import {scanVolumeStocks} from './volume-scan.js';
@@ -713,6 +713,15 @@ async function predictionScorecard(userId){
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.24.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
+app.get('/api/workbench/context',auth,(_req,res)=>{
+  const now=new Date(),expectation=calendarExpectation(loadMarketCalendar(),now);
+  res.json({generatedAt:now.toISOString(),verified:expectation.verified,
+    expectedThrough:expectation.expected||null,calendarSource:expectation.source||null,
+    calendarVersion:expectation.version||null,reason:expectation.reason||null,
+    sessionState:expectation.sessionState||'unknown',riskBudget:null,
+    qualification:{state:SCREEN_STRATEGY.state,qualified:null,t2Enabled:false},
+    limits:['结构观察不代表完整上涨策略已成立','风险预算待设置；不生成个人仓位建议']});
+});
 app.get('/api/model/status', auth, (_req,res) => res.json(modelStatus()));
 app.get('/api/session',async(req,res)=>{
   try{
@@ -1004,6 +1013,8 @@ app.post('/api/research-history/:id/notes',auth,async(req,res)=>{
   catch(error){res.status(error.status||503).json({error:error.message})}
 });
 
+app.get('/research-workbench.js',(_req,res)=>res.sendFile(path.join(root,'research-workbench.js')));
+app.get('/workbench.css',(_req,res)=>res.sendFile(path.join(root,'workbench.css')));
 app.get('/styles.css', (_req, res) => res.sendFile(path.join(root, 'styles.css')));
 app.get('/app.js', (_req, res) => res.sendFile(path.join(root, 'app.js')));
 app.use('/api',(_req,res)=>res.status(404).json({error:'接口不存在'}));

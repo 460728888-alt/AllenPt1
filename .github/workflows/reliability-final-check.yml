@@ -1,14 +1,18 @@
-name: 上传版本最终验收
+name: 机会研究台升级验收
 
 on:
   push:
-    branches: [fix/forecast-horizon-v1]
+    branches: [upgrade/opportunity-workbench-v2]
     paths:
       - '**/*.js'
       - '**/*.mjs'
       - 'package*.json'
       - 'migrations/**'
       - 'calendars/**'
+      - '**/*.html'
+      - '**/*.css'
+      - 'scripts/**'
+      - 'tests/**'
       - '.github/workflows/reliability-final-check.yml'
   workflow_dispatch:
 
@@ -17,7 +21,7 @@ permissions:
 
 jobs:
   verify:
-    if: github.ref == 'refs/heads/fix/forecast-horizon-v1'
+    if: github.ref == 'refs/heads/upgrade/opportunity-workbench-v2'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -80,6 +84,7 @@ jobs:
       - name: 项目单元检查
         run: |
           set -euo pipefail
+          node --check research-workbench.js
           node --check tests/postgres-http.mjs
           npm run check 2>&1 | tee test-logs/unit.log
 
@@ -96,6 +101,9 @@ jobs:
       - name: 安装浏览器
         run: npx playwright install --with-deps chromium
 
+      - name: 安装中文截图字体
+        run: sudo apt-get install -y fonts-noto-cjk
+
       - name: 平板手机桌面交互检查
         run: |
           set -euo pipefail
@@ -108,7 +116,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: uploaded-version-acceptance-evidence
+          name: Allen-workbench-v2-preview-and-evidence
           path: |
             test-logs/
             test-results/
