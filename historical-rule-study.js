@@ -144,6 +144,7 @@ export function runRuleStudy({protocol,calendar,series,downloads=[],reconstructe
     sameDateUniverseExcess:baseDates.get(date)===null?null:raw-baseDates.get(date),
     positivePriceFraction:mean(records.map(r=>r.outcome.positive?1:0))};
   });
+  const assumed=bps=>r=>r.outcome.exitPrice*(1-bps/20000)/(r.outcome.entryPrice*(1+bps/20000))-1;
   return {id,signalStockDays:signals.length,labelledStockDays:labelled.length,labelMissing:signals.length-labelled.length,
    distinctDates:daily.length,distinctSymbols:new Set(labelled.map(r=>r.symbol)).size,
    grossPositivePriceFraction:mean(labelled.map(r=>r.outcome.positive?1:0)),
@@ -153,23 +154,28 @@ export function runRuleStudy({protocol,calendar,series,downloads=[],reconstructe
    uncertainty:{rawReturn:bootstrap(daily,validation,protocol.bootstrap,'rawReturn'),
     sampleExcess:bootstrap(daily,validation,protocol.bootstrap,'sameDateUniverseExcess')},
    hypotheticalCostScenarios:protocol.costScenarioBps.map(bps=>({roundTripBps:bps,executable:false,
-    meanAssumedReturn:mean(labelled.map(r=>r.outcome.exitPrice*(1-bps/20000)/(r.outcome.entryPrice*(1+bps/20000))-1))})),
+    dailyEqualWeightMeanAssumedReturn:mean(daily.map(d=>mean(labelled.filter(r=>r.dataThrough===d.date).map(assumed(bps))))),
+    stockDayMeanAssumedReturn:mean(labelled.map(assumed(bps)))})),
    quarters:[1,2,3,4].map(q=>{const list=daily.filter(r=>Math.floor((Number(r.date.slice(5,7))-1)/3)+1===q);
     return {quarter:q,dates:list.length,meanPriceReturn:mean(list.map(r=>r.rawReturn)),meanSampleExcess:mean(list.map(r=>r.sameDateUniverseExcess).filter(finite))}}),
    daily};
  });
  const sourceSuccess=protocol.universe.filter(r=>lookup.has(r.symbol)).length;
  const benchmarkLabels=valid.filter(row=>finite(row.outcome.benchmarkReturn)).length;
- return {version:'five-session-reconstruction-1',protocolId:protocol.id,protocolSha256:hash(protocol),
-  sourceCommit,reconstructedAt,provenance:'reconstructed',dataKind:'historical_provider_data',approved:false,
-  status:!sourceSuccess?'unable_to_study':!valid.length?'insufficient_labels':sourceSuccess<protocol.universe.length||benchmarkLabels<valid.length?'partial_exploratory_study':'exploratory_price_study',
+ const purged=ledger.filter(row=>row.state==='purged_boundary').length,eligible=ledger.length-purged,features=ledger.filter(row=>row.rules).length;
+ return {version:'five-session-reconstruction-1.1',protocolId:protocol.id,protocolSha256:hash(protocol),
+  sourceCommit,reconstructedAt,provenance:'reconstructed',dataKind:'historical_provider_data',approved:false,historicalQuoteScaleVerified:false,
+  status:!sourceSuccess?'unable_to_study':!valid.length?'insufficient_labels':sourceSuccess<protocol.universe.length||benchmarkLabels<valid.length||valid.length<eligible?'partial_exploratory_study':'exploratory_price_study',
   winner:null,liveStrategyChanged:false,probabilitiesEnabled:false,
   coverage:{requestedStocks:protocol.universe.length,receivedStocks:sourceSuccess,failedStocks:protocol.universe.length-sourceSuccess,
+   eligibleStockDays:eligible,featureCoverage:eligible?features/eligible:null,priceLabelCoverage:eligible?valid.length/eligible:null,
    benchmarkAvailable:!!benchmark,benchmarkPriceLabels:benchmarkLabels,missingBenchmarkLabels:valid.length-benchmarkLabels,submittedStockDays:ledger.length,featureReadable:ledger.filter(r=>r.rules).length,
    validPriceLabels:valid.length,purgedBoundary:ledger.filter(r=>r.state==='purged_boundary').length,exclusionReasons:exclusions},
   definitions:{target:'次交易日开盘至第5交易日收盘的提供方价格变化；不是当时预测或交易胜率',
    legacy:'原观察条件，未包含完整先前上涨和阶段顺序；不使用不兼容的合格候选门槛',
    priorTrend:'仅在回调窗口之前40根日线内：后20根均价高于前20根，且末收盘高于首收盘；研究对照，不是正式策略',
+   trigger:'原结构模块的价格突破且当日量比至少1.5；旧内部ID price_trigger_only 不表示已剥离量能条件，不能用它估计量能的独立增益',
+   costWeighting:'主统计与成本情景均先算日期内股票等权、再对日期等权；股票日等权另列辅助统计，不能混合比较',
    simpleTrend:'当时收盘>MA20且MA20>MA60；固定简单对照',
    sampleBasis:'仓库当前固定A股名单，非当时全市场；含幸存者与选择偏差',
    uncertainty:'按官方交易日作10日移动块重采样，日期内等权，探索性区间；不证明未来优势'},
@@ -177,7 +183,7 @@ export function runRuleStudy({protocol,calendar,series,downloads=[],reconstructe
   limitations:['事后重建，不声称历史当时生成过预测；历史数据可能修订，无法证明严格未参与开发的样本',
    '只请求2024—2025日线，2026测试区未评估；规则与名单不根据本次结果调整',
    '当前名单不是无偏历史股票池，上市退市、停牌及板块状态不完整',
-   'Yahoo价格尺度与公司行动未经独立交易所核验；特征按虚拟观察日复权锚点重建，标签含公司行动窗口排除',
+   'Yahoo价格尺度与公司行动未经独立交易所核验；复权因子按观察日锚定不能恢复提供方已因未来拆股重写的历史quote，固定0.01报价单位可能改变边界信号；严格历史时点价格口径未验证',
    '股票日信号重叠且相关，不能把行数当独立样本数；未模拟资金、仓位及真实组合',
    '没有可靠成交标记；成本为假设可成交的比例费率情景，不含最低佣金、税差、实际滑点与冲击',
    '固定五日价格研究不执行结构失效或交易止损，不能据此报告止盈止损先后或组合回撤']};

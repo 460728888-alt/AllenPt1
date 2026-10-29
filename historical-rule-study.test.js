@@ -154,8 +154,8 @@ test('date-block uncertainty is deterministic and overlapping stock-days are not
  const cost=all.hypotheticalCostScenarios;
  assert.deepEqual(cost.map(x=>x.roundTripBps),[0,30,60]);
  assert.ok(cost.every(x=>x.executable===false));
- assert.ok(cost[2].meanAssumedReturn<cost[1].meanAssumedReturn);
- assert.ok(cost[1].meanAssumedReturn<cost[0].meanAssumedReturn);
+ assert.ok(cost[2].dailyEqualWeightMeanAssumedReturn<cost[1].dailyEqualWeightMeanAssumedReturn);
+ assert.ok(cost[1].dailyEqualWeightMeanAssumedReturn<cost[0].dailyEqualWeightMeanAssumedReturn);
 });
 test('short sample retains estimates but declines an uncertainty interval',()=>{
  const short={...protocol,validationThrough:'2025-01-10',requestThrough:'2025-01-10'};
@@ -196,4 +196,23 @@ test('the prior-trend contrast measures only the period before the recent 20-ses
   Object.assign(row,{open:close,close,high:close+1,low:close-1});
  }
  assert.equal(observeRules(changed,day,calendar.sessions).evidence.priorTrend,false);
+});
+
+test('zero-cost uses exactly the same date weighting as the primary gross mean',()=>{
+ const data=make('BBB.SZ'),start='2025-02-03';
+ for(const row of data.rows)if(row.date<start)row.volume=null;
+ const report=study({series:[stock(),data,index()]}),all=group(report);
+ assert.ok(Math.abs(all.hypotheticalCostScenarios[0].dailyEqualWeightMeanAssumedReturn-all.dailyEqualWeightMeanPriceReturn)<1e-14);
+ const labels=report.ledger.filter(r=>r.rules?.all_readable&&r.state==='price_label_only');
+ const expected=labels.reduce((sum,r)=>sum+r.outcome.rawReturn,0)/labels.length;
+ assert.ok(Math.abs(all.hypotheticalCostScenarios[0].stockDayMeanAssumedReturn-expected)<1e-14);
+});
+
+test('incomplete stock-day coverage and unverified historic quote scale are explicit',()=>{
+ const data=stock();data.rows.find(r=>r.date===day).volume=null;
+ const report=study({series:[data,make('BBB.SZ'),index()]});
+ assert.equal(report.status,'partial_exploratory_study');
+ assert.ok(report.coverage.featureCoverage<1);assert.ok(report.coverage.priceLabelCoverage<1);
+ assert.equal(report.historicalQuoteScaleVerified,false);
+ assert.ok(report.limitations.some(s=>s.includes('未来拆股')));
 });
