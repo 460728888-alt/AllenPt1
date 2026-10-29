@@ -41,7 +41,7 @@ async function loadCloudState(){const result=await api('/api/user-state');if(res
 async function api(url, options={}) {
   const res = await fetch(url,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
   const data = await res.json().catch(()=>({}));
-  if (!res.ok) throw new Error(data.error || '请求失败');
+  if (!res.ok) throw Object.assign(new Error(data.error || '请求失败'),{status:res.status});
   return data;
 }
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2400)}
@@ -268,6 +268,7 @@ async function pollVolumeScreen(jobId,owner){
    await new Promise(resolve=>setTimeout(resolve,1500));
    if(currentUser!==owner||state.page!=='volumeScreen'||state.volumeScreenPolling!==jobId)return;
    const job=await api('/api/volume-screen/jobs/'+encodeURIComponent(jobId));
+   if(currentUser!==owner||state.page!=='volumeScreen'||state.volumeScreenPolling!==jobId)return;
    if(job.status==='running'){const box=$('#volumeScreenResult');if(box)box.innerHTML=volumeScreenProgress(job.progress);continue}
    if(job.status==='done'){state.volumeScreen=job.result;state.volumeScreenPolling=null;await volumeScreenPage();return}
    if(job.status==='failed'){state.volumeScreenPolling=null;throw new Error(job.error||'筛选失败')}
@@ -276,9 +277,11 @@ async function pollVolumeScreen(jobId,owner){
 }
 
 async function volumeScreenPage(){
+ const owner=currentUser;
  document.body.classList.remove('dashboard-mode');
  let readError='';
  if(!state.volumeScreen&&!state.volumeScreenPolling){try{state.volumeScreen=(await api('/api/volume-screen/latest')).result}catch(error){readError=error.message}}
+ if(currentUser!==owner||state.page!=='volumeScreen')return;
  $('#content').innerHTML=`<section class="card volume-screen-intro"><div><p class="eyebrow">自动找股票</p><h2>找出正在“缩量等待”的股票</h2><p>先回调，再横盘，成交量变小，低点不再往下。真正放量上涨时才确认。</p></div><form id="volumeScreenForm"><button class="primary" type="submit">${state.volumeScreenPolling?'正在筛选…':'开始筛选'}</button></form></section><div id="volumeScreenResult" class="section">${readError?`<p class="warning">记录暂不可读取：${esc(readError)}</p>`:''}${state.volumeScreen?volumeScreenResults(state.volumeScreen):state.volumeScreenPolling?volumeScreenProgress():'<div class="card empty"><h2>点一下开始筛选</h2><p>系统会分批检查约1200只成交活跃A股，并固定跟踪入选股票。</p></div>'}</div>${disclaimer()}`;
 }
 
@@ -338,7 +341,7 @@ async function showUnreadAnnouncements(){try{const {announcements}=await api('/a
 function showAlertQueue(items){if(!items?.length)return;if($('#announcementPopup')||$('#alertPopup')){setTimeout(()=>showAlertQueue(items),1200);return}const a=items[0];document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="alertPopup"><div class="modal-card announcement-card"><div class="announcement-icon">${a.level==='风险'?'🚨':'🔔'}</div><span class="badge ${a.level==='风险'?'red':'orange'}">${esc(a.level)}</span><h2>${esc(a.title)}</h2><p>${esc(a.content)}</p><p class="muted">${new Date(a.createdAt).toLocaleString('zh-CN')}</p><div class="announcement-actions"><button class="ghost" data-alert-later>稍后提醒</button><button class="primary" data-alert-read="${a.id}">我知道了</button></div></div></div>`);$('#alertPopup').dataset.remaining=JSON.stringify(items.slice(1))}
 async function monitorAndShowAlerts(){await api('/api/monitor',{method:'POST'}).catch(()=>{});try{const {alerts}=await api('/api/alerts');showAlertQueue(alerts)}catch{}}
 
-async function render(){document.body.classList.toggle('workbench-mode',['dashboard','evolution','archive','validation'].includes(state.page));if(state.page==='stock')return renderStock();const routes={dashboard,evolution:evolutionPage,archive:researchArchivePage,validation:validationPage,legacyDashboard,watchlist,search:searchPage,aiChat:aiChatPage,aiScreen:aiScreenPage,volumeScreen:volumeScreenPage,prediction:predictionPage,decisions,risks,events,portfolio,calculator,theses,brief,settings,admin:adminPage};await routes[state.page]?.()}
+async function render(){document.body.classList.toggle('workbench-mode',['dashboard','evolution','archive','validation'].includes(state.page));if(state.page==='stock')return renderStock();const routes={dashboard,evolution:evolutionPage,archive:researchArchivePage,validation:validationPage,legacyDashboard,watchlist,search:searchPage,aiChat:aiChatPage,aiScreen:aiScreenPage,volumeScreen:volumeScreenPage,prediction:predictionPage,decisions,risks,events,portfolio,calculator,theses,brief,settings,admin:adminPage};await routes[state.page]?.();if(state.page==='volumeScreen')wbPaintUpdate()}
 
 /* Opportunity-first workbench. Existing research, screening and portfolio routes remain available. */
 function wb(){return globalThis.AllenWorkbench}
@@ -347,6 +350,7 @@ function wbPrice(value){return Number.isFinite(value)&&value>0?'¥'+value.toFixe
 function wbDate(value){return value?String(value).replace('T',' ').slice(0,19):'未记录'}
 function wbUrl(value){try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return''}}
 function resetWorkbenchState(){
+ wbRefreshController?.cancel();wbRefreshController=null;state.wbLatestScan=null;
  state.wb=null;state.wbEpoch=(state.wbEpoch||0)+1;state.wbFilter='all';state.archiveId=null;
  state.archiveRecord=null;state.archiveMode='original';state.archiveContext=null;
 }
@@ -366,10 +370,63 @@ async function wbLoad(page){
    if(!valid){result.errors[names[i]]='响应格式不完整，无法核验';return}
    result[names[i]]=i===0?data.result:i===1?data.items:i===2?data.reports:data;
  });
+ if(state.wbLatestScan&&(!result.scan||Date.parse(state.wbLatestScan.createdAt)>=Date.parse(result.scan.createdAt))){result.scan=state.wbLatestScan;result.scanFromMemory=true}
  result.context=result.context||{verified:false,expectedThrough:null};
  result.cards=wb().cards(result.scan,result.history||[],result.context);
  state.wb=result;return result;
 }
+
+let wbRefreshController=null;
+function wbScanButton(){
+ const s=wbRefreshController?.state,busy=wbRefreshController?.busy();
+ return '<button class="wb-button primary" data-wb-update '+(busy?'disabled aria-busy="true"':'')+'>'+(busy?'正在更新…':s?.phase==='error'&&s.jobId?'继续读取进度':'更新机会')+'</button>';
+}
+function wbUpdateStatus(){
+ const s=wbRefreshController?.state;
+ if(!s||s.phase==='idle')return '';
+ if(s.phase==='error')return '<p class="wb-warning">更新未完成：'+esc(s.error)+'。下方历史记录仍保留，不能据此判断没有机会。</p>';
+ if(s.phase==='done'){
+  const usable=s.result?.coverage?.usable;
+  return '<p class="'+(usable===0?'wb-warning':'wb-update-done')+'">'+(usable===0?'扫描结束，但数据不足，无法完成判断。历史卡片仅供留档复核，不代表本次新增机会。':'本次扫描结束，请按确认条件继续研究。')+
+   (s.result?.storage?.durable===true?' 结果已保存。':' 本次结果未留档，保存状态未确认。')+(s.error?' '+esc(s.error):'')+'</p>';
+ }
+ const p=s.progress,known=Number.isFinite(p?.total),checked=Number.isFinite(p?.checked)?p.checked:null;
+ return '<div class="wb-update-running"><b>正在更新机会</b><p>'+
+  (known?'已核验 '+wbValue(checked,0)+' / '+wbValue(p.total,0)+'；失败 '+wbValue(p.failed,0):
+   '正在连接扫描任务；实际覆盖数量以服务返回为准。')+
+  '</p><small>可以切换页面；正在重试同一任务时不会重复启动。'+esc(s.error||'')+'</small></div>';
+}
+function wbPaintUpdate(){
+ if(['dashboard','evolution'].includes(state.page)){
+  const box=$('#wbUpdateStatus');if(box)box.innerHTML=wbUpdateStatus();
+  for(const button of document.querySelectorAll('[data-wb-update]')){
+   button.disabled=!!wbRefreshController?.busy();button.textContent=button.disabled?'正在更新…':wbRefreshController?.state.phase==='error'&&wbRefreshController.state.jobId?'继续读取进度':'更新机会';
+  }
+ }
+ if(state.page==='volumeScreen'){
+  const button=$('#volumeScreenForm button'),box=$('#volumeScreenResult');
+  if(button){button.disabled=!!wbRefreshController?.busy();button.textContent=button.disabled?'正在更新…':'更新机会'}
+  if(box&&wbRefreshController?.busy())box.innerHTML=wbUpdateStatus();
+ }
+}
+async function wbStartUpdate(){
+ const owner=currentUser;
+ if(!owner)return;
+ if(!wbRefreshController){
+  wbRefreshController=new globalThis.AllenOpportunityRefresh({
+   start:()=>api('/api/volume-screen',{method:'POST',body:JSON.stringify({limit:1200})}),
+   read:id=>api('/api/volume-screen/jobs/'+encodeURIComponent(id)),
+   onChange:()=>{if(currentUser===owner)wbPaintUpdate()},
+   onDone:async result=>{
+    if(currentUser!==owner)return;
+    state.wbLatestScan=result;state.volumeScreen=result;
+    if(['dashboard','evolution','volumeScreen'].includes(state.page))await render();
+   }
+  });
+ }
+ await wbRefreshController.run();
+}
+
 function wbHeader(kicker,title,detail,actions=''){
  return '<section class="wb-page-heading"><div><p class="eyebrow">'+esc(kicker)+'</p><h2>'+esc(title)+'</h2><p>'+esc(detail)+'</p></div><div class="wb-actions">'+actions+'</div></section>';
 }
@@ -424,14 +481,15 @@ function wbRiskRail(data){
 async function dashboard(){
  document.body.classList.remove('dashboard-mode');$('#content').innerHTML='<div class="wb-loading">正在读取研究记录与数据状态…</div>';
  const data=await wbLoad('dashboard');if(!data)return;
- const active=data.cards.filter(c=>!['invalid','paused','event'].includes(c.phase.key)&&!wb().ended(c.researchStatus));
+ const blocked=['failed','insufficient'].includes(wb().scanState(data.scan,data.errors.scan).key);
+ const active=blocked?[]:data.cards.filter(c=>!['invalid','paused','event'].includes(c.phase.key)&&!wb().ended(c.researchStatus));
  const focus=active[0]||data.cards.find(c=>c.phase.key==='paused'&&!wb().ended(c.researchStatus));
- const title=focus?(focus.phase.key==='paused'?'先核验 '+(focus.name||focus.symbol):'先研究 '+(focus.name||focus.symbol)):'今天，可以继续等。';
+ const title=blocked?'先核验数据，暂停新判断。':focus?(focus.phase.key==='paused'?'先核验 '+(focus.name||focus.symbol):'先研究 '+(focus.name||focus.symbol)):'今天，可以继续等。';
  $('#content').innerHTML=wbHeader('ALLEN / OPPORTUNITY DESK','今日机会','发现理由 → 等待确认 → 跟踪变化 → 及时复核',
-   '<button class="wb-button secondary" data-wb-refresh>刷新记录</button><button class="wb-button primary" data-go="volumeScreen">运行量价筛选 →</button>')+
+   '<button class="wb-button secondary" data-wb-refresh>读取已存记录</button>'+wbScanButton())+
  '<section class="wb-hero"><div class="wb-hero-main"><span class="wb-overline">短期机会优先 · 先看证据</span><h2>'+esc(title)+'</h2><p>'+esc(focus?focus.phase.reason:'没有充分证据时不强行推荐股票。先检查数据覆盖，再判断是否值得关注。')+'</p><div class="wb-hero-tags"><span>正式资格：未判定</span><span>风险预算：待设置</span><span>不展示未经验证的概率</span></div>'+(focus?'<button class="wb-button light" data-wb-open="'+esc(focus.viewId)+'">打开这条研究 →</button>':'<button class="wb-button light" data-go="search">研究指定股票 →</button>')+'</div><div class="wb-hero-checklist"><div><span>01 / 还差什么</span><p>'+esc(focus?wbCondition(focus):'先取得完整行情、确定观察范围，再核验上涨趋势与阶段先后。')+'</p></div><div><span>02 / 什么时候放弃</span><p>'+esc(focus?wbInvalidation(focus):'原假设的失效条件必须先明确；数据失败时暂停判断。')+'</p></div></div></section>'+
- wbStatus(data)+'<div class="wb-home-grid"><section class="wb-candidate-area"><div class="wb-section-title"><div><span class="wb-overline">先关注谁 / 为什么</span><h3>优先研究清单</h3></div><button class="wb-link" data-go="evolution">机会演化图 →</button></div><p class="wb-muted">按研究阶段和固定代码顺序展示，不是收益排名。观察池与合格候选分别统计。</p><div class="wb-card-grid">'+
- (active.slice(0,4).map(item=>wbCard(item)).join('')||'<div class="wb-empty"><span aria-hidden="true">◎</span><h3>'+esc(wb().scanState(data.scan,data.errors.scan).label)+'</h3><p>历史或待核验记录保留在右侧和演化图；没有可用数据时不显示“没有机会”。</p></div>')+
+ '<div id="wbUpdateStatus" role="status" aria-live="polite">'+wbUpdateStatus()+'</div>'+wbStatus(data)+'<div class="wb-home-grid"><section class="wb-candidate-area"><div class="wb-section-title"><div><span class="wb-overline">先关注谁 / 为什么</span><h3>优先研究清单</h3></div><button class="wb-link" data-go="evolution">机会演化图 →</button></div><p class="wb-muted">首页最多展示3条重点观察，不是收益排名；完整候选、失效及历史记录在演化图保留。</p><div class="wb-card-grid">'+
+ (active.slice(0,3).map(item=>wbCard(item)).join('')||'<div class="wb-empty"><span aria-hidden="true">◎</span><h3>'+esc(wb().scanState(data.scan,data.errors.scan).label)+'</h3><p>历史或待核验记录保留在右侧和演化图；没有可用数据时不显示“没有机会”。</p></div>')+
  '</div></section><aside>'+wbRiskRail(data)+wbEventChannel(data)+'</aside></div>'+
  '<section class="wb-tools"><h3>继续你的研究</h3><div>'+[['watchlist','我的股票池'],['aiChat','AI研究对话'],['prediction','趋势与结构研究'],['decisions','条件式价格计划'],['portfolio','持仓与费用'],['theses','研究卡与投资逻辑'],['brief','每日简报'],['validation','验证与限制'],['legacyDashboard','经典概览']].map(([id,name])=>'<button data-go="'+id+'">'+name+' ↗</button>').join('')+'</div></section>'+disclaimer();
 }
@@ -446,9 +504,9 @@ function wbRenderEvolution(data){
  const visible=filter==='all'?populated:stages.filter(key=>filter===key);
  const absent=stages.filter(key=>!populated.includes(key));
  $('#content').innerHTML=wbHeader('ALLEN / EVOLUTION MAP','机会演化图','阶段可以倒退、暂停、到期和失效；走到最后不表示盈利。',
- '<button class="wb-button secondary" data-wb-refresh>刷新记录</button><button class="wb-button primary" data-go="volumeScreen">量价筛选 →</button>')+
+ '<button class="wb-button secondary" data-wb-refresh>读取已存记录</button>'+wbScanButton())+
  '<div class="wb-stage-principle"><b>先后关系必须有证据</b><p>上涨趋势、缩量回调、收窄整理、放量突破、后续验证是待检验路径。旧扫描未留存完整顺序，所以当前没有“整套策略已确认”的绿色通行证。</p></div>'+
- wbStatus(data)+'<div class="wb-filter" role="group" aria-label="机会阶段筛选">'+[['all','全部'],...Object.entries(wb().labels).filter(([k])=>k!=='event')].map(([key,name])=>'<button aria-pressed="'+(filter===key)+'" class="'+(filter===key?'active':'')+'" data-wb-filter="'+key+'">'+name+' <small>'+data.cards.filter(c=>key==='all'||c.phase.key===key).length+'</small></button>').join('')+'</div>'+
+ '<div id="wbUpdateStatus" role="status" aria-live="polite">'+wbUpdateStatus()+'</div>'+wbStatus(data)+'<div class="wb-filter" role="group" aria-label="机会阶段筛选">'+[['all','全部'],...Object.entries(wb().labels).filter(([k])=>k!=='event')].map(([key,name])=>'<button aria-pressed="'+(filter===key)+'" class="'+(filter===key?'active':'')+'" data-wb-filter="'+key+'">'+name+' <small>'+data.cards.filter(c=>key==='all'||c.phase.key===key).length+'</small></button>').join('')+'</div>'+
  '<p class="wb-muted">有记录的阶段优先展开；这不是必须按顺序完成的盈利路径。</p><div class="wb-board">'+visible.map(key=>'<section class="wb-lane"><div class="wb-lane-heading"><span aria-hidden="true">'+esc(({trend:'◇',pullback:'↘',compression:'≈',trigger:'↗',follow:'◌'})[key])+'</span><h3>'+esc(wb().labels[key])+'</h3><b>'+shown.filter(c=>c.phase.key===key).length+'</b></div>'+shown.filter(c=>c.phase.key===key).map(item=>wbCard(item,true)).join('')+(!shown.some(c=>c.phase.key===key)?'<p class="wb-lane-empty">没有已记录候选，继续等待。</p>':'')+'</section>').join('')+'</div>'+
  (filter==='all'&&absent.length?'<details class="wb-absent-stages"><summary>查看尚无记录的阶段（'+absent.length+'）</summary><div>'+absent.map(key=>'<section><b>'+esc(wb().labels[key])+'</b><p>没有已留档候选；继续等待或补齐证据。</p></section>').join('')+'</div></details>':'')+
  ['paused','invalid'].filter(key=>filter==='all'||filter===key).map(key=>'<section class="wb-ended"><div class="wb-section-title"><h3>'+esc(wb().labels[key])+' · 保留全部返回记录</h3><b>'+shown.filter(c=>c.phase.key===key).length+'</b></div><div class="wb-ended-grid">'+shown.filter(c=>c.phase.key===key).map(item=>wbCard(item,true)).join('')+'</div></section>').join('')+
@@ -532,12 +590,14 @@ async function validationPage(){
  ['02','公平验证','后续按时间划分、处理标签跨界、扣除成本并披露幸存者偏差。当前不展示未经验证的回测成绩。'],
  ['03','风险约束','风险预算待设置。止损参考不保证退出价格；需考虑跳空、停牌、跌停、T+1与流动性。'],
  ['04','完整公开','观察、失效、数据缺口、未预测及未成交都应保留；完成复盘不等于判断正确。']].map(([n,t,p])=>'<section class="wb-panel"><span class="wb-overline">'+n+'</span><h3>'+t+'</h3><p>'+p+'</p></section>').join('')+'</div>'+
+ '<section class="wb-panel"><h3>短期离线核验工具</h3><p>已提供按时间隔离、逐目标比较和概率校准检查的工具；目前仅有合成自检，没有真实策略成绩。</p><p>上涨与跑赢基准分别统计。先止盈后止损缺少成交时间顺序，暂不评估；组合回撤也未完成验证。</p><p>正式策略仍待确定，不自动训练、挑选或启用模型。</p></section>'+
  '<section class="wb-panel"><h3>当前模型与筛选状态</h3><p>'+esc(data.errors.model||data.model?.message||'当前模型验证说明未返回；不推断可用性。')+'</p><p>模型版本 '+esc(data.model?.version||'未返回')+' · 是否启用 '+(data.model?.active===true?'以模型清单逐周期核验':'当前未启用／未确认')+'</p><p>本研究台不把规则分、历史频率或模型排序展示成已验证的上涨概率。</p><p>T1＋1.5 配置不兼容，合格候选未判定；T2未启用。</p><button class="wb-button secondary" data-go="prediction">打开原趋势研究与记录</button></section>'+wbStatus(data)+disclaimer();
 }
 
 pageMeta.archive='个股研究档案';
 document.addEventListener('click',async e=>{
  const open=e.target.closest('[data-wb-open]');if(open){await wbOpen(open.dataset.wbOpen);return}
+ if(e.target.closest('[data-wb-update]')){await wbStartUpdate();return}
  if(e.target.closest('[data-wb-refresh]')){await render();return}
  const filter=e.target.closest('[data-wb-filter]');if(filter){state.wbFilter=filter.dataset.wbFilter;if(state.wb)wbRenderEvolution(state.wb);return}
  const time=e.target.closest('[data-wb-time]');if(time){state.archiveMode=time.dataset.wbTime==='later'?'later':'original';wbRenderArchive();return}
@@ -616,7 +676,7 @@ document.addEventListener('submit',async e=>{
  if(e.target.id==='searchForm')return doSearch($('#searchInput').value.trim());
  if(e.target.id==='aiChatForm'){const button=e.target.querySelector('button[type="submit"]'),d=Object.fromEntries(new FormData(e.target)),history=state.aiMessages.slice(-6);state.aiMessages.push({role:'user',content:d.question});store.set('aiMessages',state.aiMessages);button.disabled=true;button.textContent='AI 分析中…';try{const result=await api('/api/ai/chat',{method:'POST',body:JSON.stringify({symbol:d.symbol,question:d.question,history})});state.aiMessages.push({role:'assistant',content:result.answer});store.set('aiMessages',state.aiMessages);await aiChatPage()}catch(err){state.aiMessages.push({role:'assistant',content:'暂时无法回答：'+err.message});store.set('aiMessages',state.aiMessages);await aiChatPage()}return}
  if(e.target.id==='aiScreenForm'){const owner=currentUser,box=$('#screenResult'),button=e.target.querySelector('button[type="submit"]'),d=Object.fromEntries(new FormData(e.target));state.aiScreenCriteria=d;store.set('aiScreenCriteria',d);button.disabled=true;button.textContent='扫描进行中…';box.innerHTML=loading();try{const result=await api('/api/ai/screen',{method:'POST',body:JSON.stringify(d)});if(currentUser!==owner)return;await pollRadar(result.jobId,owner)}catch(err){if(currentUser===owner&&state.page==='aiScreen')box.innerHTML=`<div class="card empty">${esc(err.message)}</div>`}finally{button.disabled=false;button.textContent='扫描并核验证据'}return}
- if(e.target.id==='volumeScreenForm'){const owner=currentUser,box=$('#volumeScreenResult'),button=e.target.querySelector('button[type="submit"]');button.disabled=true;button.textContent='正在筛选…';box.innerHTML=volumeScreenProgress();try{const result=await api('/api/volume-screen',{method:'POST',body:JSON.stringify({limit:1200})});await pollVolumeScreen(result.jobId,owner)}catch(err){if(currentUser===owner&&state.page==='volumeScreen')box.innerHTML=`<div class="card empty"><h2>这次筛选没有完成</h2><p>${esc(err.message)}</p></div>`}finally{button.disabled=false;button.textContent='重新筛选'}return}
+ if(e.target.id==='volumeScreenForm'){await wbStartUpdate();return}
  if(e.target.id==='predictionForm'){const box=$('#predictionResult'),button=e.target.querySelector('button[type="submit"]'),d=Object.fromEntries(new FormData(e.target));button.disabled=true;button.textContent='正在读取量价结构…';box.innerHTML=loading();try{state.predictionView='structure';state.prediction=await api('/api/prediction',{method:'POST',body:JSON.stringify(d)});predictionPage()}catch(err){box.innerHTML=`<div class="card empty"><h2>暂时无法完成结构分析</h2><p>${esc(err.message)}</p><p>请确认是有效的六位沪深 A 股代码，或稍后再试。</p></div>`;button.disabled=false;button.textContent='重新分析'}return}
  if(e.target.id==='calculatorForm'){const d=Object.fromEntries(new FormData(e.target)),input={name:String(d.name||''),buyPrice:Number(d.buyPrice),qty:Number(d.qty),sellPrice:Number(d.sellPrice),stopPrice:Number(d.stopPrice)||0,capital:Number(d.capital)||0,targetProfit:Number(d.targetProfit)||0};const fees={commissionRatePer10000:Number(d.commissionRatePer10000),minimumCommission:Number(d.minimumCommission),stampDutyRatePer10000:Number(d.stampDutyRatePer10000),transferFeeRatePer10000:Number(d.transferFeeRatePer10000)};if(!(input.buyPrice>0&&input.sellPrice>0&&Number.isInteger(input.qty)&&input.qty>0))return toast('请填写有效的买价、卖价和整数股数');if(Object.values(fees).some(v=>!Number.isFinite(v)||v<0))return toast('请检查交易费率');state.feeSettings=fees;store.set('feeSettings',fees);state.calculatorResult=calculateTrade(input,fees);calculator();toast('已按个人费率计算');return}
  if(e.target.id==='modalForm'){const d=Object.fromEntries(new FormData(e.target));if(d.type==='portfolio'){state.portfolio.push({symbol:d.symbol.toUpperCase(),name:d.name,buy:+d.buy,qty:+d.qty,cycle:d.cycle,riskPreference:d.riskPreference,date:d.date,thesis:d.thesis});store.set('portfolio',state.portfolio);$('#modal').remove();portfolio()}else{state.theses.push({symbol:d.symbol.toUpperCase(),name:d.name,cycle:d.cycle,created:new Date().toISOString().slice(0,10),reason:d.reason,risk:d.risk});store.set('theses',state.theses);$('#modal').remove();theses()}toast('已保存')}

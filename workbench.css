@@ -195,3 +195,7 @@
 .wb-absent-stages section{flex:1;min-width:160px;padding:12px;background:#edf2f7;border-radius:7px}
 .wb-absent-stages b{font-size:11px;color:#5d7792}
 .wb-absent-stages p{font-size:10px;line-height:1.7}
+
+.wb-update-running{padding:16px 20px;margin:16px 0;background:#edf4ff;border:1px solid #c8d8ed;border-radius:12px;color:#42678f}
+.wb-update-running b{font-size:13px}.wb-update-running p{font-size:12px;margin:8px 0}.wb-update-running small{font-size:10px}
+.wb-update-done{padding:13px 17px;border-radius:9px;background:#ecf4f1;color:#437368;font-size:12px;line-height:1.8}

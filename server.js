@@ -1013,6 +1013,7 @@ app.post('/api/research-history/:id/notes',auth,async(req,res)=>{
   catch(error){res.status(error.status||503).json({error:error.message})}
 });
 
+app.get('/opportunity-refresh.js',(_req,res)=>res.sendFile(path.join(root,'opportunity-refresh.js')));
 app.get('/research-workbench.js',(_req,res)=>res.sendFile(path.join(root,'research-workbench.js')));
 app.get('/workbench.css',(_req,res)=>res.sendFile(path.join(root,'workbench.css')));
 app.get('/styles.css', (_req, res) => res.sendFile(path.join(root, 'styles.css')));

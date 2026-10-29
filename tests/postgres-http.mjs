@@ -459,6 +459,55 @@ await test('real site restart, failure notices and backup export',{
           assert.deepEqual(errors,[]);
         }finally{await context.close()}
       });
+
+      await t.test('home updates in one click, reuses its task across navigation and exposes failed coverage',async()=>{
+        const {context,page,errors}=await openPage(1194,834,'observe');
+        let posts=0,ready=false,partial=false;
+        const makeResult=()=>({
+          id:'synthetic-home-update-'+posts,createdAt:new Date().toISOString(),
+          strategy:SCREEN_STRATEGY,items:[],counts:{qualified:null,observations:0},
+          storage:{durable:false,state:'unavailable'},
+          coverage:{requested:2,returned:partial?1:0,failed:partial?1:2,usable:partial?1:0,
+            coveragePct:partial?50:0,partial:true,dateRange:['2026-10-12','2026-10-12'],
+            failures:[{symbol:'SYNTHETIC',code:'timeout',message:'合成：行情请求失败'}]}
+        });
+        try{
+          await page.route('**/api/workbench/context',route=>route.fulfill({json:{
+            verified:true,expectedThrough:'2026-10-12',calendarSource:'synthetic-only',riskBudget:null
+          }}));
+          await page.route('**/api/volume-screen',route=>{
+            if(route.request().method()!=='POST')return route.continue();
+            posts++;return route.fulfill({status:202,json:{jobId:'synthetic-home-job'}});
+          });
+          await page.route('**/api/volume-screen/jobs/synthetic-home-job',route=>route.fulfill({json:ready?
+            {status:'done',result:makeResult()}:{status:'running',progress:{checked:1,total:2,failed:0}}}));
+          await page.reload({waitUntil:'networkidle'});
+          await page.locator('[data-wb-update]').waitFor();
+          await page.evaluate(()=>{const button=document.querySelector('[data-wb-update]');button.click();button.click()});
+          await page.locator('#wbUpdateStatus').filter({hasText:'已核验 1 / 2'}).waitFor();
+          assert.equal(posts,1);
+          await page.locator('.wb-hero [data-wb-open]').click();
+          await page.locator('.wb-archive-grid').waitFor();
+          await navigate(page,'dashboard','常用');
+          await page.locator('#wbUpdateStatus').filter({hasText:'正在更新机会'}).waitFor();
+          assert.equal(posts,1);
+          ready=true;
+          await page.locator('#wbUpdateStatus').filter({hasText:'无法完成判断'}).waitFor();
+          await page.locator('.wb-data-strip .wb-state').filter({hasText:'无法完成判断'}).waitFor();
+          assert.match(await page.locator('#content').innerText(),/本次结果未留档/);
+          assert.ok(!(await page.locator('#content').innerText()).includes('已核验范围暂无结构观察'));
+          const before=await json('/api/research-history/'+recordId);
+          partial=true;
+          await page.locator('[data-wb-update]').click();
+          await page.locator('#wbUpdateStatus').filter({hasText:'本次扫描结束'}).waitFor();
+          assert.equal(posts,2);
+          assert.match(await page.locator('.wb-data-strip').innerText(),/50\.0%/);
+          await page.locator('.wb-data-strip summary').click();
+          assert.match(await page.locator('.wb-data-strip').innerText(),/合成：行情请求失败/);
+          assert.deepEqual(await json('/api/research-history/'+recordId),before);
+          assert.deepEqual(errors,[]);
+        }finally{await context.close()}
+      });
       await t.test('standalone synthetic preview demonstrates all three pages and five data states',async()=>{
         const {buildWorkbenchPreview}=await import('../scripts/build-workbench-preview.mjs');
         const previewPath=root+'test-results/Allen-opportunity-preview.html';

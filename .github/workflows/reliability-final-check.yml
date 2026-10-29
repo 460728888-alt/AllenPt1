@@ -70,6 +70,8 @@ jobs:
             app.js \
             server.js \
             research-store.js \
+            opportunity-refresh.js \
+            research-validation.js \
             research-card-state.js \
             research-card-state.test.js \
             tests/postgres-integration.mjs \
@@ -87,6 +89,11 @@ jobs:
           node --check research-workbench.js
           node --check tests/postgres-http.mjs
           npm run check 2>&1 | tee test-logs/unit.log
+
+      - name: 离线验证框架合成自检
+        run: |
+          mkdir -p test-results
+          node scripts/validate-research.mjs --demo --output test-results/validation-framework-demo.json
 
       - name: UTC 数据库和整站检查
         run: |
