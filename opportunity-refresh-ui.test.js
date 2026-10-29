@@ -32,3 +32,15 @@ test('new unsaved scan remains explicit instead of being replaced with an older 
  assert.equal(result.scan.id,'new-unsaved');assert.equal(result.scan.storage.durable,false);
  assert.equal(result.scan.coverage.usable,0);
 });
+
+test('late latest-scan response cannot populate a new account or overwrite another page',async()=>{
+ for(const switchAccount of [true,false]){
+  const {context,run}=setup();
+  run("currentUser={username:'one'};state.page='volumeScreen';state.volumeScreen=null;let finishLatest;api=()=>new Promise(r=>finishLatest=r);globalThis.pendingRead=volumeScreenPage()");
+  if(switchAccount)run("currentUser={username:'two'};loadUserState()");
+  else run("state.page='archive'");
+  run("finishLatest({result:{id:'old-private-result'}})");
+  await context.pendingRead;
+  assert.equal(run('state.volumeScreen'),null);
+ }
+});

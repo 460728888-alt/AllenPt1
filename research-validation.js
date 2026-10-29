@@ -47,35 +47,55 @@ function barValid(bar){
  return bar?.complete===true&&['open','high','low','close'].every(k=>positive(bar[k]))&&
   bar.high>=Math.max(bar.open,bar.close,bar.low)&&bar.low<=Math.min(bar.open,bar.close,bar.high);
 }
-export function buildPriceCases(input){
+function decisionPartition(date,p,sessions){
+ const nextAfter=d=>sessions[sessions.indexOf(d)+1+p.split.embargoSessions];
+ const v=nextAfter(p.split.trainEnd),t=nextAfter(p.split.validationEnd);
+ return date<=p.split.trainEnd?'train':v&&date>=v&&date<=p.split.validationEnd?'validation':
+  t&&date>=t&&date<=p.split.testEnd?'test':'outside';
+}
+export function buildPriceCases(input,{selectedPartition=null}={}){
  const p=validateProtocol(input),sessions=input.sessions,barMap=new Map(),ids=new Set();
+ const allowed=new Set();
+ if(selectedPartition)for(const record of input.records){
+  if(decisionPartition(record.dataThrough,p,sessions)!==selectedPartition)continue;
+  const i=sessions.indexOf(record.dataThrough),window=sessions.slice(i+1,i+1+p.horizonSessions);
+  const limit=selectedPartition==='validation'?p.split.validationEnd:p.split.testEnd;
+  if(window.length!==p.horizonSessions||window.at(-1)>limit)continue;
+  for(const date of window){allowed.add(record.symbol+'|'+date);allowed.add(p.benchmark+'|'+date)}
+ }
  for(const bar of input.bars){
-  assert(typeof bar.symbol==='string'&&day(bar.date),'bar needs symbol/date');
-  const key=bar.symbol+'|'+bar.date;assert(!barMap.has(key),'duplicate bar: '+key);barMap.set(key,bar);
+  const key=bar?.symbol+'|'+bar?.date;
+  if(selectedPartition&&!allowed.has(key))continue;
+  assert(typeof bar?.symbol==='string'&&day(bar.date),'bar needs symbol/date');
+  assert(!barMap.has(key),'duplicate bar: '+key);barMap.set(key,bar);
  }
  return input.records.map(record=>{
   assert(typeof record.id==='string'&&record.id&&!ids.has(record.id),'unique immutable research IDs required');ids.add(record.id);
-  const base={id:record.id,symbol:record.symbol,decisionDate:record.dataThrough,labels:{up:null,outperform:null,target_before_stop:null},
-   execution:{state:'unknown',netReturn:null,benchmarkReturn:null,adversePriceExcursion:null},record,reason:null};
+  const meta={id:record.id,symbol:record.symbol,decisionDate:record.dataThrough,record};
+  if(selectedPartition&&decisionPartition(record.dataThrough,p,sessions)!==selectedPartition)
+   return {...meta,state:'sealed'};
+  const base={...meta,labels:{up:null,outperform:null,target_before_stop:null},
+   execution:{state:'unknown',netReturn:null,benchmarkReturn:null,adversePriceExcursion:null},reason:null};
   const reject=reason=>({...base,state:'excluded',reason});
   const i=sessions.indexOf(record.dataThrough),window=sessions.slice(i+1,i+1+p.horizonSessions);
+  const entryDate=window[0],labelThrough=window.at(-1);
+  if(window.length!==p.horizonSessions)return reject('future_horizon_incomplete');
+  const limit=selectedPartition==='validation'?p.split.validationEnd:selectedPartition==='test'?p.split.testEnd:null;
+  if(selectedPartition&&labelThrough>limit)return {...meta,entryDate,labelThrough,state:'purged'};
   if(i<0||!day(record.featureThrough)||record.featureThrough>record.dataThrough||
     !stamp(record.featureAvailableAt)||!stamp(record.generatedAt)||Date.parse(record.featureAvailableAt)>Date.parse(record.generatedAt)||
     !record.featureSnapshotHash||!record.strategyVersion)return reject('missing_or_future_feature_provenance');
-  const entryDate=window[0],labelThrough=window.at(-1);
-  if(window.length!==p.horizonSessions)return reject('future_horizon_incomplete');
-  const entryAt=Date.parse(entryDate+'T09:30:00+08:00');
-  if(Date.parse(record.generatedAt)>=entryAt)return reject('prediction_generated_after_entry');
+  if(Date.parse(record.generatedAt)>=Date.parse(entryDate+'T09:30:00+08:00'))return reject('prediction_generated_after_entry');
   const decisionClose=Date.parse(record.dataThrough+'T15:05:00+08:00');
   if(Date.parse(record.featureAvailableAt)<decisionClose||Date.parse(record.generatedAt)<decisionClose)
     return reject('complete_daily_bar_not_available_at_generation');
   const stock=window.map(date=>barMap.get(record.symbol+'|'+date));
   const bench=window.map(date=>barMap.get(p.benchmark+'|'+date));
-  if(stock.some(bar=>!barValid(bar))||bench.some(bar=>!barValid(bar)))return reject('missing_or_invalid_session_bar');
-  if([...stock,...bench].some(bar=>bar.corporateAction!==false))return reject('corporate_action_or_price_basis_unverified');
-  const first=stock[0],last=stock.at(-1),benchmarkReturn=bench.at(-1).close/bench[0].open-1;
-  const rawReturn=last.close/first.open-1;
-  const labels={up:rawReturn>0?1:0,outperform:rawReturn>benchmarkReturn?1:0,target_before_stop:null};
+  if(stock.some(bar=>!barValid(bar)))return reject('missing_or_invalid_session_bar');
+  if(stock.some(bar=>bar.corporateAction!==false))return reject('corporate_action_or_price_basis_unverified');
+  const first=stock[0],last=stock.at(-1),benchmarkValid=bench.every(bar=>barValid(bar)&&bar.corporateAction===false);
+  const benchmarkReturn=benchmarkValid?bench.at(-1).close/bench[0].open-1:null,rawReturn=last.close/first.open-1;
+  const labels={up:rawReturn>0?1:0,outperform:benchmarkValid?(rawReturn>benchmarkReturn?1:0):null,target_before_stop:null};
   let execution={state:'unknown',netReturn:null,benchmarkReturn,
     adversePriceExcursion:Math.min(...stock.map(bar=>bar.low))/first.open-1};
   if(first.suspended===true||first.canBuyOpen===false)execution.state='unfilled';
@@ -83,12 +103,13 @@ export function buildPriceCases(input){
   else if(last.suspended===true||last.canSellClose===false)execution.state='exit_unresolved';
   else if(last.suspended!==false||last.canSellClose!==true)execution.state='exit_execution_unknown';
   else{
-   const entry=first.open*(1+p.costs.buySlippageBps/10000);
-   const exit=last.close*(1-p.costs.sellSlippageBps/10000);
+   const entry=first.open*(1+p.costs.buySlippageBps/10000),exit=last.close*(1-p.costs.sellSlippageBps/10000);
    execution={...execution,state:'cost_scenario',netReturn:exit*(1-p.costs.sellBps/10000)/(entry*(1+p.costs.buyBps/10000))-1};
   }
-  return {...base,state:'labelled',entryDate,labelThrough,plannedExit:labelThrough,actualExit:null,
-   rawReturn,labels,execution,barrierReason:'OHLC不能证明可成交的止盈止损先后；此目标未评估，不用价格触达冒充交易成功'};
+  return {...base,state:'labelled',entryDate,labelThrough,plannedExit:labelThrough,actualExit:null,rawReturn,labels,execution,
+   targetReasons:{outperform:benchmarkValid?null:'benchmark_data_or_price_basis_unverified',
+    target_before_stop:'missing_executable_intraday_order'},
+   barrierReason:'OHLC不能证明可成交的止盈止损先后；此目标未评估，不用价格触达冒充交易成功'};
  });
 }
 export function purgedSplit(cases,protocol,sessions){
@@ -96,6 +117,7 @@ export function purgedSplit(cases,protocol,sessions){
  const validationStart=nextAfter(f.trainEnd),testStart=nextAfter(f.validationEnd);
  const out={train:[],validation:[],test:[],purged:[],outside:[]};
  for(const c of cases){
+  if(c.state==='purged'){out.purged.push(c);continue}
   if(c.state!=='labelled'){out.outside.push(c);continue}
   const d=c.decisionDate;
   let key=d<=f.trainEnd?'train':validationStart&&d>=validationStart&&d<=f.validationEnd?'validation':
@@ -138,7 +160,7 @@ export function evaluateResearch(input,{partition='validation',allowFinalTest=fa
  assert(['validation','test'].includes(partition),'only held-out partitions can be scored');
  assert(partition!=='test'||allowFinalTest&&frozenProtocolHash===protocolHash(protocol)&&frozenDatasetHash===datasetHash(input),
   'final test is sealed; explicitly freeze a protocol before requesting it');
- const cases=buildPriceCases(input),split=purgedSplit(cases,protocol,input.sessions),chosen=split[partition];
+ const cases=buildPriceCases(input,{selectedPartition:partition}),split=purgedSplit(cases,protocol,input.sessions),chosen=split[partition];
  const modelNames=[...new Set(chosen.flatMap(c=>Object.keys(c.record.forecasts||{})))].sort();
  const results={};
  for(const target of targets){
@@ -156,7 +178,7 @@ export function evaluateResearch(input,{partition='validation',allowFinalTest=fa
     return {name,eligible:labelled.length,predicted:rows.length,abstained:labelled.length-rows.length,
      abstainedFraction:labelled.length?1-rows.length/labelled.length:null,overallUnscoredFraction:chosen.length?1-rows.length/chosen.length:null,...scores(rows),
      commonSample:scores(paired),fixed50BaselineOnCommon:scores(paired.map(r=>({...r,p:.5}))),
-     periods:[...new Set(rows.map(r=>r.date.slice(0,7)))].map(month=>({month,...scores(rows.filter(r=>r.date.startsWith(month)))}))};
+     periods:[...new Set(chosen.map(r=>r.decisionDate.slice(0,7)))].map(month=>{const eligible=labelled.filter(c=>c.decisionDate.startsWith(month)).length,list=rows.filter(r=>r.date.startsWith(month));return {month,eligible,predicted:list.length,abstained:eligible-list.length,...scores(list)}})};
    })};
  }
  const executionCounts={};for(const c of chosen)executionCounts[c.execution.state]=(executionCounts[c.execution.state]||0)+1;
@@ -170,14 +192,14 @@ export function evaluateResearch(input,{partition='validation',allowFinalTest=fa
    target_before_stop:'尚缺可成交的时间顺序证据，未评估'},
   counts:{submitted:cases.length,labelled:cases.filter(c=>c.state==='labelled').length,
    excluded:cases.filter(c=>c.state==='excluded').length,purged:split.purged.length,
-   train:split.train.length,validation:split.validation.length,test:split.test.length,outside:split.outside.length},
+   train:split.train.length,validation:split.validation.length,test:split.test.length,sealed:cases.filter(c=>c.state==='sealed').length,outside:split.outside.filter(c=>c.state!=='sealed').length},
   exclusionReasons:reasons,targets:results,
   execution:{counts:executionCounts,netScenarioSamples:executed.length,
    meanNetScenarioReturn:mean(executed.map(c=>c.execution.netReturn)),
-   meanBenchmarkGrossReturn:mean(executed.map(c=>c.execution.benchmarkReturn)),
+   meanBenchmarkGrossReturn:mean(executed.map(c=>c.execution.benchmarkReturn).filter(finite)),benchmarkScenarioSamples:executed.filter(c=>finite(c.execution.benchmarkReturn)).length,
    worstAdversePriceExcursion:chosen.length?Math.min(...chosen.map(c=>c.execution.adversePriceExcursion)):null,
    portfolioMaxDrawdown:null,actualTradingReturn:null},
-  ledger:cases.map(({record,...c})=>chosen.some(row=>row.id===c.id)?c:{id:c.id,symbol:c.symbol,decisionDate:c.decisionDate,entryDate:c.entryDate,labelThrough:c.labelThrough,state:c.state==='excluded'?'excluded':'sealed_or_outside_selected_partition',reason:c.reason}),
+  ledger:cases.map(({record,...c})=>chosen.some(row=>row.id===c.id)?c:{id:c.id,symbol:c.symbol,decisionDate:c.decisionDate,entryDate:c.entryDate,labelThrough:c.labelThrough,state:c.state==='excluded'?'excluded':c.state==='purged'?'purged':'sealed_or_outside_selected_partition',...(c.state==='excluded'?{reason:c.reason}:{})}),
   limitations:['不训练、不选择或启用模型；不证明最高准确率','特征时间与版本依赖输入记录，元数据声明不能独立证明没有泄漏',
    '历史股票范围：'+input.metadata.universeBasis+'；当前名单不能视为无偏历史样本',
    '净收益仅是显式比例成本与滑点情景，不含最低佣金或组合资金约束',

@@ -462,7 +462,7 @@ await test('real site restart, failure notices and backup export',{
 
       await t.test('home updates in one click, reuses its task across navigation and exposes failed coverage',async()=>{
         const {context,page,errors}=await openPage(1194,834,'observe');
-        let posts=0,ready=false,partial=false;
+        let posts=0,ready=false,partial=false,taskFail=false;
         const makeResult=()=>({
           id:'synthetic-home-update-'+posts,createdAt:new Date().toISOString(),
           strategy:SCREEN_STRATEGY,items:[],counts:{qualified:null,observations:0},
@@ -480,7 +480,7 @@ await test('real site restart, failure notices and backup export',{
             posts++;return route.fulfill({status:202,json:{jobId:'synthetic-home-job'}});
           });
           await page.route('**/api/volume-screen/jobs/synthetic-home-job',route=>route.fulfill({json:ready?
-            {status:'done',result:makeResult()}:{status:'running',progress:{checked:1,total:2,failed:0}}}));
+            (taskFail?{status:'failed',error:'合成扫描任务失败'}:{status:'done',result:makeResult()}):{status:'running',progress:{checked:1,total:2,failed:0}}}));
           await page.reload({waitUntil:'networkidle'});
           await page.locator('[data-wb-update]').waitFor();
           await page.evaluate(()=>{const button=document.querySelector('[data-wb-update]');button.click();button.click()});
@@ -505,6 +505,12 @@ await test('real site restart, failure notices and backup export',{
           await page.locator('.wb-data-strip summary').click();
           assert.match(await page.locator('.wb-data-strip').innerText(),/合成：行情请求失败/);
           assert.deepEqual(await json('/api/research-history/'+recordId),before);
+          taskFail=true;
+          await navigate(page,'volumeScreen','AI 研究');
+          await page.locator('#volumeScreenForm button').click();
+          await page.locator('#volumeScreenResult').getByText(/更新未完成：合成扫描任务失败/).waitFor();
+          assert.match(await page.locator('#volumeScreenResult').innerText(),/50\.0%/);
+          assert.equal(posts,3);
           assert.deepEqual(errors,[]);
         }finally{await context.close()}
       });

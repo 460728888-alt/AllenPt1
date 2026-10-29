@@ -6,7 +6,7 @@
    Object.assign(this,{start,read,sleep,onChange,onDone,maxPolls});this.epoch=0;this.pending=null;
    this.state={phase:'idle',jobId:null,progress:null,result:null,error:null};
   }
-  busy(){return ['starting','running'].includes(this.state.phase)}
+  busy(){return ['starting','running','finishing'].includes(this.state.phase)}
   emit(patch){this.state={...this.state,...patch};this.onChange(this.state)}
   cancel(){this.epoch++;this.pending=null;this.state={phase:'idle',jobId:null,progress:null,result:null,error:null}}
   run(){
@@ -39,10 +39,11 @@
      if(job?.status==='failed'){id=null;throw Error(job.error||'更新未完成，不能判断有没有机会')}
      if(job?.status!=='done')throw Error('任务状态未核验，更新未完成');
      const result=job.result;
-     if(!result||!result.coverage||!Number.isFinite(result.coverage.usable)||!Array.isArray(result.items))
+     if(!result||!result.coverage||!Number.isInteger(result.coverage.usable)||result.coverage.usable<0||!Number.isInteger(result.coverage.requested)||result.coverage.requested<result.coverage.usable||!Number.isFinite(Date.parse(result.createdAt))||!Array.isArray(result.items))
        throw Error('结果或覆盖范围缺失，无法完成判断');
-     this.emit({phase:'done',jobId:null,result,error:null,progress:job.progress||null});
+     this.emit({phase:'finishing',jobId:null,result,error:null,progress:job.progress||null});
      try{await this.onDone(result)}catch(error){if(token===this.epoch)this.emit({error:'扫描已结束，但页面更新失败，请刷新记录：'+error.message})}
+     if(token===this.epoch)this.emit({phase:'done'});
      return result;
     }
     throw Error('等待进度超时；任务可能仍在运行，点击继续读取');

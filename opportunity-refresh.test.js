@@ -44,3 +44,17 @@ test('saving failure remains a visible result without changing original data',as
  const c=new C({start:async()=>({jobId:'one'}),read:async()=>({status:'done',result}),sleep:async()=>{}});
  await c.run();assert.equal(c.state.result.storage.durable,false);assert.equal(JSON.stringify(result),original);
 });
+
+test('negative coverage and missing completion timestamps cannot become valid results',async()=>{
+ for(const bad of [{...result,coverage:{usable:-1,requested:2}},{...result,createdAt:null}]){
+  const c=new C({start:async()=>({jobId:'one'}),read:async()=>({status:'done',result:bad}),sleep:async()=>{}});
+  await c.run();assert.equal(c.state.phase,'error');assert.equal(c.state.result,null);
+ }
+});
+test('the update button stays busy until the rendered result is ready',async()=>{
+ const hold=deferred(),called=deferred();
+ const c=new C({start:async()=>({jobId:'one'}),read:async()=>({status:'done',result}),sleep:async()=>{},
+  onDone:async()=>{called.resolve();await hold.promise}});
+ const p=c.run();await called.promise;assert.equal(c.busy(),true);assert.equal(c.state.phase,'finishing');
+ hold.resolve();await p;assert.equal(c.busy(),false);assert.equal(c.state.phase,'done');
+});

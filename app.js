@@ -277,11 +277,11 @@ async function pollVolumeScreen(jobId,owner){
 }
 
 async function volumeScreenPage(){
- const owner=currentUser;
+ const owner=currentUser,epoch=state.volumeReadEpoch=(state.volumeReadEpoch||0)+1;
  document.body.classList.remove('dashboard-mode');
  let readError='';
- if(!state.volumeScreen&&!state.volumeScreenPolling){try{state.volumeScreen=(await api('/api/volume-screen/latest')).result}catch(error){readError=error.message}}
- if(currentUser!==owner||state.page!=='volumeScreen')return;
+ if(!state.volumeScreen&&!state.volumeScreenPolling){try{const response=await api('/api/volume-screen/latest');if(currentUser!==owner||state.page!=='volumeScreen'||state.volumeReadEpoch!==epoch)return;state.volumeScreen=response.result}catch(error){if(currentUser!==owner||state.page!=='volumeScreen'||state.volumeReadEpoch!==epoch)return;readError=error.message}}
+ if(currentUser!==owner||state.page!=='volumeScreen'||state.volumeReadEpoch!==epoch)return;
  $('#content').innerHTML=`<section class="card volume-screen-intro"><div><p class="eyebrow">自动找股票</p><h2>找出正在“缩量等待”的股票</h2><p>先回调，再横盘，成交量变小，低点不再往下。真正放量上涨时才确认。</p></div><form id="volumeScreenForm"><button class="primary" type="submit">${state.volumeScreenPolling?'正在筛选…':'开始筛选'}</button></form></section><div id="volumeScreenResult" class="section">${readError?`<p class="warning">记录暂不可读取：${esc(readError)}</p>`:''}${state.volumeScreen?volumeScreenResults(state.volumeScreen):state.volumeScreenPolling?volumeScreenProgress():'<div class="card empty"><h2>点一下开始筛选</h2><p>系统会分批检查约1200只成交活跃A股，并固定跟踪入选股票。</p></div>'}</div>${disclaimer()}`;
 }
 
@@ -350,7 +350,7 @@ function wbPrice(value){return Number.isFinite(value)&&value>0?'¥'+value.toFixe
 function wbDate(value){return value?String(value).replace('T',' ').slice(0,19):'未记录'}
 function wbUrl(value){try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return''}}
 function resetWorkbenchState(){
- wbRefreshController?.cancel();wbRefreshController=null;state.wbLatestScan=null;
+ wbRefreshController?.cancel();wbRefreshController=null;state.wbLatestScan=null;state.volumeReadEpoch=(state.volumeReadEpoch||0)+1;
  state.wb=null;state.wbEpoch=(state.wbEpoch||0)+1;state.wbFilter='all';state.archiveId=null;
  state.archiveRecord=null;state.archiveMode='original';state.archiveContext=null;
 }
@@ -385,6 +385,7 @@ function wbUpdateStatus(){
  const s=wbRefreshController?.state;
  if(!s||s.phase==='idle')return '';
  if(s.phase==='error')return '<p class="wb-warning">更新未完成：'+esc(s.error)+'。下方历史记录仍保留，不能据此判断没有机会。</p>';
+ if(s.phase==='finishing')return '<p class="wb-update-done">扫描已结束，正在整理本次记录…</p>';
  if(s.phase==='done'){
   const usable=s.result?.coverage?.usable;
   return '<p class="'+(usable===0?'wb-warning':'wb-update-done')+'">'+(usable===0?'扫描结束，但数据不足，无法完成判断。历史卡片仅供留档复核，不代表本次新增机会。':'本次扫描结束，请按确认条件继续研究。')+
@@ -400,13 +401,14 @@ function wbPaintUpdate(){
  if(['dashboard','evolution'].includes(state.page)){
   const box=$('#wbUpdateStatus');if(box)box.innerHTML=wbUpdateStatus();
   for(const button of document.querySelectorAll('[data-wb-update]')){
-   button.disabled=!!wbRefreshController?.busy();button.textContent=button.disabled?'正在更新…':wbRefreshController?.state.phase==='error'&&wbRefreshController.state.jobId?'继续读取进度':'更新机会';
+   button.disabled=!!wbRefreshController?.busy();button.setAttribute('aria-busy',String(button.disabled));button.textContent=button.disabled?'正在更新…':wbRefreshController?.state.phase==='error'&&wbRefreshController.state.jobId?'继续读取进度':'更新机会';
   }
  }
  if(state.page==='volumeScreen'){
   const button=$('#volumeScreenForm button'),box=$('#volumeScreenResult');
   if(button){button.disabled=!!wbRefreshController?.busy();button.textContent=button.disabled?'正在更新…':'更新机会'}
   if(box&&wbRefreshController?.busy())box.innerHTML=wbUpdateStatus();
+  else if(box&&wbRefreshController?.state.phase==='error')box.innerHTML=wbUpdateStatus()+(state.volumeScreen?volumeScreenResults(state.volumeScreen):'');
  }
 }
 async function wbStartUpdate(){
@@ -590,7 +592,7 @@ async function validationPage(){
  ['02','公平验证','后续按时间划分、处理标签跨界、扣除成本并披露幸存者偏差。当前不展示未经验证的回测成绩。'],
  ['03','风险约束','风险预算待设置。止损参考不保证退出价格；需考虑跳空、停牌、跌停、T+1与流动性。'],
  ['04','完整公开','观察、失效、数据缺口、未预测及未成交都应保留；完成复盘不等于判断正确。']].map(([n,t,p])=>'<section class="wb-panel"><span class="wb-overline">'+n+'</span><h3>'+t+'</h3><p>'+p+'</p></section>').join('')+'</div>'+
- '<section class="wb-panel"><h3>短期离线核验工具</h3><p>已提供按时间隔离、逐目标比较和概率校准检查的工具；目前仅有合成自检，没有真实策略成绩。</p><p>上涨与跑赢基准分别统计。先止盈后止损缺少成交时间顺序，暂不评估；组合回撤也未完成验证。</p><p>正式策略仍待确定，不自动训练、挑选或启用模型。</p></section>'+
+ '<section class="wb-panel"><h3>短期离线核验工具</h3><p>已提供按时间隔离、逐目标比较和概率校准检查的工具；目前仅有合成自检，没有真实策略成绩。仓库原有报告主要针对20日，不能套用成一周上涨证据。</p><p>上涨与跑赢基准分别统计。先止盈后止损缺少成交时间顺序，暂不评估；组合回撤也未完成验证。</p><p>正式策略仍待确定，不自动训练、挑选或启用模型。</p></section>'+
  '<section class="wb-panel"><h3>当前模型与筛选状态</h3><p>'+esc(data.errors.model||data.model?.message||'当前模型验证说明未返回；不推断可用性。')+'</p><p>模型版本 '+esc(data.model?.version||'未返回')+' · 是否启用 '+(data.model?.active===true?'以模型清单逐周期核验':'当前未启用／未确认')+'</p><p>本研究台不把规则分、历史频率或模型排序展示成已验证的上涨概率。</p><p>T1＋1.5 配置不兼容，合格候选未判定；T2未启用。</p><button class="wb-button secondary" data-go="prediction">打开原趋势研究与记录</button></section>'+wbStatus(data)+disclaimer();
 }
 

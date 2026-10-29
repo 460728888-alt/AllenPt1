@@ -106,3 +106,26 @@ test('price labels do not change when costs change and never become stop-first l
  assert.deepEqual(x.labels,y.labels);assert.notEqual(x.execution.netReturn,y.execution.netReturn);
  assert.equal(x.labels.target_before_stop,null);
 });
+
+test('validation never exposes held-out or purged future data availability through counts or reasons',()=>{
+ const input=validationFixture(),changed=clone(input);
+ const dates=[input.sessions[46],input.sessions[40]];
+ changed.bars=changed.bars.filter(bar=>!(bar.symbol==='SYNTHETIC-A'&&dates.includes(bar.date)));
+ const a=evaluateResearch(input),b=evaluateResearch(changed);
+ assert.deepEqual(a.counts,b.counts);assert.deepEqual(a.exclusionReasons,b.exclusionReasons);
+ assert.deepEqual(a.targets,b.targets);assert.deepEqual(a.ledger,b.ledger);
+});
+test('missing benchmark affects outperform labels without deleting valid up labels or stock cost scenarios',()=>{
+ const input=validationFixture();input.bars=input.bars.filter(b=>!(b.symbol==='SYNTHETIC-INDEX'&&b.date===input.sessions[22]));
+ const c=buildPriceCases(input).find(row=>row.id==='SYNTHETIC-20');
+ assert.equal(c.state,'labelled');assert.notEqual(c.labels.up,null);assert.equal(c.labels.outperform,null);
+ assert.equal(c.execution.state,'cost_scenario');assert.equal(c.execution.benchmarkReturn,null);
+ const r=evaluateResearch(input);assert.ok(r.targets.up.labelled>r.targets.outperform.labelled);
+});
+test('an entire month of abstention stays visible rather than disappearing from period reports',()=>{
+ const input=validationFixture();
+ for(const record of input.records)if(record.dataThrough.startsWith('2026-02'))delete record.forecasts.synthetic_A.up;
+ const r=evaluateResearch(input).targets.up.models.find(m=>m.name==='synthetic_A');
+ const month=r.periods.find(p=>p.month==='2026-02');
+ assert.ok(month);assert.equal(month.predicted,0);assert.equal(month.accuracy,null);
+});
