@@ -409,6 +409,7 @@ function wbPaintUpdate(){
   if(button){button.disabled=!!wbRefreshController?.busy();button.textContent=button.disabled?'正在更新…':'更新机会'}
   if(box&&wbRefreshController?.busy())box.innerHTML=wbUpdateStatus();
   else if(box&&wbRefreshController?.state.phase==='error')box.innerHTML=wbUpdateStatus()+(state.volumeScreen?volumeScreenResults(state.volumeScreen):'');
+  else if(box&&wbRefreshController?.state.phase==='done')box.innerHTML=wbUpdateStatus()+(state.volumeScreen?volumeScreenResults(state.volumeScreen):'');
  }
 }
 async function wbStartUpdate(){

@@ -511,6 +511,12 @@ await test('real site restart, failure notices and backup export',{
           await page.locator('#volumeScreenResult').getByText(/更新未完成：合成扫描任务失败/).waitFor();
           assert.match(await page.locator('#volumeScreenResult').innerText(),/50\.0%/);
           assert.equal(posts,3);
+          taskFail=false;
+          await page.locator('#volumeScreenForm button').click();
+          await page.locator('#volumeScreenResult').getByText(/本次扫描结束/).waitFor();
+          assert.match(await page.locator('#volumeScreenResult').innerText(),/50\.0%/);
+          assert.ok(!(await page.locator('#volumeScreenResult').innerText()).includes('正在整理本次记录'));
+          assert.equal(posts,4);
           assert.deepEqual(errors,[]);
         }finally{await context.close()}
       });
@@ -565,6 +571,9 @@ await test('real site restart, failure notices and backup export',{
               }
               await page.screenshot({path:artifacts+width+'-scene-'+scene+'.png',fullPage:true});
             }
+            await page.locator('[data-preview-scene="observe"]').click();
+            await page.locator('[data-wb-update]').click();
+            await page.locator('#wbUpdateStatus').filter({hasText:'本次结果未留档'}).waitFor();
             assert.deepEqual(errors,[]);assert.deepEqual(remote,[]);
             browserChecks.push({width,height,mode:'new-workbench-replay-and-five-states',passed:true});
           }finally{await context.close()}
