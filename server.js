@@ -1,7 +1,7 @@
 import {createResearchStore} from './research-store.js';
 import fs from 'node:fs';
 import {loadMarketCalendar} from './market-calendar.js';
-import {finiteNumber,dataError,normalizeDailyChart,failureOf} from './data-contract.js';
+import {finiteNumber,dataError,normalizeDailyChart,failureOf,calendarExpectation} from './data-contract.js';
 import {priceLevels,tradePlanFromLevels,SCREEN_STRATEGY} from './price-levels.js';
 import {guardForecast,probabilityEligibility} from './probability-contract.js';
 import {scanVolumeStocks} from './volume-scan.js';
@@ -713,6 +713,15 @@ async function predictionScorecard(userId){
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, version: '1.24.0', aiConfigured:Boolean(AI_API_KEY), rankingModel:modelStatus(),forecastModel:forecastStatus() }));
+app.get('/api/workbench/context',auth,(_req,res)=>{
+  const now=new Date(),expectation=calendarExpectation(loadMarketCalendar(),now);
+  res.json({generatedAt:now.toISOString(),verified:expectation.verified,
+    expectedThrough:expectation.expected||null,calendarSource:expectation.source||null,
+    calendarVersion:expectation.version||null,reason:expectation.reason||null,
+    sessionState:expectation.sessionState||'unknown',riskBudget:null,
+    qualification:{state:SCREEN_STRATEGY.state,qualified:null,t2Enabled:false},
+    limits:['结构观察不代表完整上涨策略已成立','风险预算待设置；不生成个人仓位建议']});
+});
 app.get('/api/model/status', auth, (_req,res) => res.json(modelStatus()));
 app.get('/api/session',async(req,res)=>{
   try{
@@ -923,6 +932,21 @@ app.post('/api/signals/snapshot',auth,async(req,res)=>{
   catch(error){res.status(500).json({error:'评分变化暂时无法保存',detail:error.message})}
 });
 
+app.get('/api/validation/five-session',auth,(_req,res)=>{
+ try{
+  const report=JSON.parse(fs.readFileSync(path.join(root,'research/results/five-session-2025-v1.1-summary.json'),'utf8'));
+  const protocol=JSON.parse(fs.readFileSync(path.join(root,'research/five-session-protocol.json'),'utf8'));
+  const digest=crypto.createHash('sha256').update(JSON.stringify(protocol)).digest('hex');
+  if(report.protocolSha256!==digest||report.provenance!=='reconstructed'||report.approved!==false||
+   report.probabilitiesEnabled!==false||report.liveStrategyChanged!==false||!Array.isArray(report.groups)||
+   JSON.stringify(report.groups.map(g=>g?.id))!==JSON.stringify(protocol.rules)||
+   report.groups.some(g=>!Array.isArray(g.hypotheticalCostScenarios)||g.hypotheticalCostScenarios.some(c=>!c||typeof c!=='object'))||
+   !report.coverage||typeof report.coverage!=='object'||Array.isArray(report.coverage))
+   throw Error('研究来源与冻结协议不一致');
+  res.set('Cache-Control','no-store').json({report});
+ }catch(error){res.status(503).json({error:'历史研究暂不可读取；不能据此判断没有机会',detail:error.message})}
+});
+
 app.get('/api/research/:symbol',auth,async(req,res)=>{
   try{res.json(await getResearchData(req.params.symbol))}
   catch(error){res.status(502).json({error:error.message||'深度研究数据暂时不可用'})}
@@ -1004,6 +1028,9 @@ app.post('/api/research-history/:id/notes',auth,async(req,res)=>{
   catch(error){res.status(error.status||503).json({error:error.message})}
 });
 
+app.get('/opportunity-refresh.js',(_req,res)=>res.sendFile(path.join(root,'opportunity-refresh.js')));
+app.get('/research-workbench.js',(_req,res)=>res.sendFile(path.join(root,'research-workbench.js')));
+app.get('/workbench.css',(_req,res)=>res.sendFile(path.join(root,'workbench.css')));
 app.get('/styles.css', (_req, res) => res.sendFile(path.join(root, 'styles.css')));
 app.get('/app.js', (_req, res) => res.sendFile(path.join(root, 'app.js')));
 app.use('/api',(_req,res)=>res.status(404).json({error:'接口不存在'}));

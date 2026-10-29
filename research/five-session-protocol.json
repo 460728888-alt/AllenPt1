@@ -1,0 +1,172 @@
+{
+  "id": "allen-five-session-reconstruction-2025-v1",
+  "version": 1,
+  "provenance": "reconstructed",
+  "approved": false,
+  "observationOnly": true,
+  "requestFrom": "2024-01-01",
+  "requestThrough": "2025-12-31",
+  "validationFrom": "2025-01-01",
+  "validationThrough": "2025-12-31",
+  "sealedTestFrom": "2026-01-01",
+  "historySessions": 60,
+  "horizonSessions": 5,
+  "benchmark": "000001.SS",
+  "entryRule": "next_session_open",
+  "exitRule": "fifth_session_close",
+  "priceBasis": "provider_quote_asof_anchor_for_features",
+  "priceOutcomeBasis": "provider_quote_gross_no_label_window_actions",
+  "costScenarioBps": [
+    0,
+    30,
+    60
+  ],
+  "bootstrap": {
+    "unit": "calendar_date_equal_weight",
+    "blockSessions": 10,
+    "replicates": 400,
+    "seed": 20261029,
+    "minSignalDates": 20
+  },
+  "rules": [
+    "all_readable",
+    "simple_trend",
+    "legacy_observation",
+    "legacy_with_prior_trend",
+    "price_trigger_only"
+  ],
+  "universeBasis": "current_repository_fallback_survivors_not_point_in_time",
+  "universeSourceCommit": "5515a5d630ef6f9cd05da58f4b4542fedfaa3e3c",
+  "universeSource": "server.js CN_NAMES A-share entries",
+  "universe": [
+    {
+      "symbol": "000001.SZ",
+      "name": "平安银行"
+    },
+    {
+      "symbol": "000333.SZ",
+      "name": "美的集团"
+    },
+    {
+      "symbol": "000651.SZ",
+      "name": "格力电器"
+    },
+    {
+      "symbol": "000725.SZ",
+      "name": "京东方A"
+    },
+    {
+      "symbol": "000823.SZ",
+      "name": "超声电子"
+    },
+    {
+      "symbol": "000858.SZ",
+      "name": "五粮液"
+    },
+    {
+      "symbol": "000977.SZ",
+      "name": "浪潮信息"
+    },
+    {
+      "symbol": "002230.SZ",
+      "name": "科大讯飞"
+    },
+    {
+      "symbol": "002463.SZ",
+      "name": "沪电股份"
+    },
+    {
+      "symbol": "002475.SZ",
+      "name": "立讯精密"
+    },
+    {
+      "symbol": "002594.SZ",
+      "name": "比亚迪"
+    },
+    {
+      "symbol": "300059.SZ",
+      "name": "东方财富"
+    },
+    {
+      "symbol": "300308.SZ",
+      "name": "中际旭创"
+    },
+    {
+      "symbol": "300750.SZ",
+      "name": "宁德时代"
+    },
+    {
+      "symbol": "600030.SS",
+      "name": "中信证券"
+    },
+    {
+      "symbol": "600036.SS",
+      "name": "招商银行"
+    },
+    {
+      "symbol": "600276.SS",
+      "name": "恒瑞医药"
+    },
+    {
+      "symbol": "600519.SS",
+      "name": "贵州茅台"
+    },
+    {
+      "symbol": "600667.SS",
+      "name": "太极实业"
+    },
+    {
+      "symbol": "600887.SS",
+      "name": "伊利股份"
+    },
+    {
+      "symbol": "600900.SS",
+      "name": "长江电力"
+    },
+    {
+      "symbol": "601012.SS",
+      "name": "隆基绿能"
+    },
+    {
+      "symbol": "601088.SS",
+      "name": "中国神华"
+    },
+    {
+      "symbol": "601138.SS",
+      "name": "工业富联"
+    },
+    {
+      "symbol": "601166.SS",
+      "name": "兴业银行"
+    },
+    {
+      "symbol": "601318.SS",
+      "name": "中国平安"
+    },
+    {
+      "symbol": "601899.SS",
+      "name": "紫金矿业"
+    },
+    {
+      "symbol": "603083.SS",
+      "name": "剑桥科技"
+    },
+    {
+      "symbol": "603986.SS",
+      "name": "兆易创新"
+    },
+    {
+      "symbol": "688008.SS",
+      "name": "澜起科技"
+    },
+    {
+      "symbol": "688041.SS",
+      "name": "海光信息"
+    },
+    {
+      "symbol": "688981.SS",
+      "name": "中芯国际"
+    }
+  ],
+  "selectionNote": "规则和样本在首次下载前冻结。结果只用于研究，不选择胜者、不修改正式筛选、不启用T2、不生成概率。"
+}

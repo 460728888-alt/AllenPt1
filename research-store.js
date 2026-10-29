@@ -84,14 +84,15 @@ export function createResearchStore(pool,{enabled=false}={}) {
       LEFT JOIN LATERAL (SELECT payload,kind FROM research_events WHERE user_id=o.user_id AND research_id=o.id ORDER BY sequence DESC LIMIT 1) e ON TRUE
       WHERE o.user_id=$1 AND ($2::text IS NULL OR o.channel=$2) ORDER BY o.created_at DESC LIMIT 200`,[userId,channel]);
     return r.rows.map(o=>({researchId:o.id,symbol:o.symbol,original:o.snapshot,snapshotHash:o.snapshot_hash,latest:o.latest,
-      firstSeenAt:o.created_at,strategyVersion:o.strategy_version,channel:o.channel,name:o.snapshot.name,status:o.latest?.status||'tracking',legacy:false}));
+      firstSeenAt:o.created_at,strategyVersion:o.strategy_version,channel:o.channel,name:o.snapshot.name,status:o.latest?.status||'tracking',latestKind:o.latest_kind,legacy:false}));
   }
   async function get(userId,id) {
     await ready();
-    const original=(await pool.query('SELECT * FROM research_opportunities WHERE user_id=$1 AND id=$2',[userId,id])).rows[0];
+    const original=(await pool.query('SELECT *,data_through::text AS data_through FROM research_opportunities WHERE user_id=$1 AND id=$2',[userId,id])).rows[0];
     if(!original)return null;
+    if(snapshotHash(original.snapshot)!==original.snapshot_hash)throw unavailable('原始快照校验失败，暂停展示与判断，请保留记录并核查');
     const events=(await pool.query('SELECT *,data_through::text AS data_through FROM research_events WHERE user_id=$1 AND research_id=$2 ORDER BY sequence',[userId,id])).rows;
-    return {researchId:id,original:original.snapshot,snapshotHash:original.snapshot_hash,events};
+    return {researchId:id,original:original.snapshot,snapshotHash:original.snapshot_hash,snapshotVerified:true,generatedAt:original.created_at,dataThrough:original.data_through,strategyVersion:original.strategy_version,calculationVersion:original.calculation_version,sourceScanId:original.source_scan_id,events};
   }
   async function note(userId,id,{requestKey,note,status}) {
     if(!requestKey||typeof note!=='string'||!note.trim())throw Object.assign(new Error('需要请求编号和复核内容'),{status:400});

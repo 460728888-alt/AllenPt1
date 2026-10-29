@@ -208,6 +208,19 @@ await test('real site restart, failure notices and backup export',{
     });
 
     let beforeRestart;
+    await t.test('frozen retrospective study is authenticated and remains separate from forecasts',async()=>{
+      const denied=await request('/api/validation/five-session',{headers:{Cookie:''}});
+      assert.equal(denied.status,401);
+      const {report}=await json('/api/validation/five-session');
+      assert.equal(report.provenance,'reconstructed');assert.equal(report.approved,false);
+      assert.equal(report.probabilitiesEnabled,false);assert.equal(report.historicalQuoteScaleVerified,false);
+      assert.equal(report.coverage.validPriceLabels,7108);
+      assert.equal(report.actualTradingReturn,null);assert.equal(report.portfolioMaxDrawdown,null);
+      assert.equal(report.dataOrigin.noNewDataRequests,true);
+      for(const group of report.groups)
+        assert.ok(Math.abs(group.hypotheticalCostScenarios[0].dailyEqualWeightMeanAssumedReturn-group.dailyEqualWeightMeanPriceReturn)<1e-14);
+    });
+
     await t.test('HTTP notes append once and leave the original unchanged',async()=>{
       const data={
         requestKey:'synthetic-http-note',
@@ -417,6 +430,190 @@ await test('real site restart, failure notices and backup export',{
           });
           assert.deepEqual(errors,[]);
         }finally{await context.close()}
+      });
+
+      await t.test('new workbench uses real history, replay and append-only note endpoints',async()=>{
+        const {context,page,errors}=await openPage(1194,834,'observe');
+        try{
+          await page.route('**/api/workbench/context',route=>route.fulfill({json:{
+            verified:true,expectedThrough:'2026-10-12',calendarSource:'synthetic-test-only',riskBudget:null
+          }}));
+          await page.reload({waitUntil:'networkidle'});
+          await page.locator('.wb-hero').waitFor();
+          assert.match(await page.locator('#content').innerText(),/风险预算/);
+          await page.locator('.wb-hero [data-wb-open]').click();
+          await page.locator('.wb-archive-grid').waitFor();
+          assert.ok(!(await page.locator('#content').innerText()).includes('合成测试笔记：不是投资判断'));
+          await page.locator('[data-wb-marker="original"]').click();
+          await page.locator('#wbEvidence').waitFor({state:'visible'});
+          assert.match(await page.locator('#wbEvidence').innerText(),/缺少|不足|未留存/);
+          await page.keyboard.press('Escape');
+          await page.locator('#wbEvidence').waitFor({state:'detached'});
+          await page.locator('[data-wb-time="later"]').click();
+          await page.getByText('合成测试笔记：不是投资判断',{exact:true}).waitFor();
+          await page.locator('#wbNote').fill('新研究档案的合成追加笔记');
+          await page.locator('.wb-note button').click();
+          await page.locator('.wb-note-status').filter({hasText:'笔记已追加'}).waitFor();
+          const saved=await json('/api/research-history/'+recordId);
+          assert.deepEqual(saved.original,original);
+          assert.equal(saved.snapshotHash,snapshotHash(original));
+          assert.equal(saved.snapshotVerified,true);
+          assert.ok(saved.generatedAt);assert.ok(saved.strategyVersion);
+          assert.ok(saved.events.some(event=>event.payload.note==='新研究档案的合成追加笔记'));
+          await page.route('**/api/research-history/*/notes',route=>route.fulfill({
+            status:503,json:{error:'合成故障，保存未成功'}
+          }));
+          await page.locator('#wbNote').fill('新界面中故意保存失败的合成笔记');
+          await page.locator('.wb-note button').click();
+          await page.locator('.wb-note-status').filter({hasText:'保存未确认'}).waitFor();
+          assert.equal(await page.locator('.wb-note button').isEnabled(),true);
+          const after=await json('/api/research-history/'+recordId);
+          assert.ok(!after.events.some(event=>event.payload.note==='新界面中故意保存失败的合成笔记'));
+          assert.deepEqual(errors,[]);
+        }finally{await context.close()}
+      });
+
+      await t.test('home updates in one click, reuses its task across navigation and exposes failed coverage',async()=>{
+        const {context,page,errors}=await openPage(1194,834,'observe');
+        let posts=0,ready=false,partial=false,taskFail=false;
+        const makeResult=()=>({
+          id:'synthetic-home-update-'+posts,createdAt:new Date().toISOString(),
+          strategy:SCREEN_STRATEGY,items:[],counts:{qualified:null,observations:0},
+          storage:{durable:false,state:'unavailable'},
+          coverage:{requested:2,returned:partial?1:0,failed:partial?1:2,usable:partial?1:0,
+            coveragePct:partial?50:0,partial:true,dateRange:['2026-10-12','2026-10-12'],
+            failures:[{symbol:'SYNTHETIC',code:'timeout',message:'合成：行情请求失败'}]}
+        });
+        try{
+          await page.route('**/api/workbench/context',route=>route.fulfill({json:{
+            verified:true,expectedThrough:'2026-10-12',calendarSource:'synthetic-only',riskBudget:null
+          }}));
+          await page.route('**/api/volume-screen',route=>{
+            if(route.request().method()!=='POST')return route.continue();
+            posts++;return route.fulfill({status:202,json:{jobId:'synthetic-home-job'}});
+          });
+          await page.route('**/api/volume-screen/jobs/synthetic-home-job',route=>route.fulfill({json:ready?
+            (taskFail?{status:'failed',error:'合成扫描任务失败'}:{status:'done',result:makeResult()}):{status:'running',progress:{checked:1,total:2,failed:0}}}));
+          await page.reload({waitUntil:'networkidle'});
+          await page.locator('[data-wb-update]').waitFor();
+          await page.evaluate(()=>{const button=document.querySelector('[data-wb-update]');button.click();button.click()});
+          await page.locator('#wbUpdateStatus').filter({hasText:'已核验 1 / 2'}).waitFor();
+          assert.equal(posts,1);
+          await page.locator('.wb-hero [data-wb-open]').click();
+          await page.locator('.wb-archive-grid').waitFor();
+          await navigate(page,'dashboard','常用');
+          await page.locator('#wbUpdateStatus').filter({hasText:'正在更新机会'}).waitFor();
+          assert.equal(posts,1);
+          ready=true;
+          await page.locator('#wbUpdateStatus').filter({hasText:'无法完成判断'}).waitFor();
+          await page.locator('.wb-data-strip .wb-state').filter({hasText:'无法完成判断'}).waitFor();
+          assert.match(await page.locator('#content').innerText(),/本次结果未留档/);
+          assert.ok(!(await page.locator('#content').innerText()).includes('已核验范围暂无结构观察'));
+          const before=await json('/api/research-history/'+recordId);
+          partial=true;
+          await page.locator('[data-wb-update]').click();
+          await page.locator('#wbUpdateStatus').filter({hasText:'本次扫描结束'}).waitFor();
+          assert.equal(posts,2);
+          assert.match(await page.locator('.wb-data-strip').innerText(),/50\.0%/);
+          await page.locator('.wb-data-strip summary').click();
+          assert.match(await page.locator('.wb-data-strip').innerText(),/合成：行情请求失败/);
+          assert.deepEqual(await json('/api/research-history/'+recordId),before);
+          taskFail=true;
+          await navigate(page,'volumeScreen','AI 研究');
+          await page.locator('#volumeScreenForm button').click();
+          await page.locator('#volumeScreenResult').getByText(/更新未完成：合成扫描任务失败/).waitFor();
+          assert.match(await page.locator('#volumeScreenResult').innerText(),/50\.0%/);
+          assert.equal(posts,3);
+          taskFail=false;
+          await page.locator('#volumeScreenForm button').click();
+          await page.locator('#volumeScreenResult').getByText(/本次扫描结束/).waitFor();
+          assert.match(await page.locator('#volumeScreenResult').innerText(),/50\.0%/);
+          assert.ok(!(await page.locator('#volumeScreenResult').innerText()).includes('正在整理本次记录'));
+          assert.equal(posts,4);
+          assert.deepEqual(errors,[]);
+        }finally{await context.close()}
+      });
+      await t.test('historical comparison discloses reconstruction and scrolls within tablet phone desktop viewports',async()=>{
+        for(const [width,height]of [[1194,834],[390,844],[1440,900]]){
+          const {context,page,errors}=await openPage(width,height,'observe');
+          try{
+            await page.locator('#shell').waitFor({state:'visible'});
+            await navigate(page,'validation','研究工具');
+            const panel=page.locator('.wb-study');
+            await panel.getByRole('heading',{name:'五交易日历史研究 · 收益优势未证明',exact:true}).waitFor();
+            const text=await panel.innerText();
+            assert.match(text,/2025年事后重建/);assert.match(text,/7108 \/ 7616/);
+            assert.match(text,/严格当时价格口径未核验/);assert.match(text,/短期概率不启用/);
+            assert.equal(await panel.locator('tbody tr').count(),5);
+            assert.ok(await panel.locator('tbody').innerText().then(s=>s.includes('0.56%')));
+            await panel.locator('summary').click();
+            assert.match(await panel.innerText(),/量比至少1.5/);
+            const size=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth}));
+            assert.ok(size.scroll<=size.width+2,JSON.stringify(size));
+            await page.screenshot({path:artifacts+'historical-study-'+width+'x'+height+'.png',fullPage:true});
+            assert.deepEqual(errors,[]);
+          }finally{await context.close()}
+        }
+      });
+
+      await t.test('standalone synthetic preview demonstrates all three pages and five data states',async()=>{
+        const {buildWorkbenchPreview}=await import('../scripts/build-workbench-preview.mjs');
+        const previewPath=root+'test-results/Allen-opportunity-preview.html';
+        fs.mkdirSync(root+'test-results',{recursive:true});
+        fs.writeFileSync(previewPath,buildWorkbenchPreview());
+        for(const [width,height] of [[1194,834],[390,844],[1440,900]]){
+          const context=await browser.newContext({viewport:{width,height},timezoneId:'Asia/Shanghai'});
+          const page=await context.newPage(),errors=[],remote=[];
+          page.on('pageerror',error=>errors.push(error.message));
+          page.on('request',request=>{if(/^https?:/.test(request.url()))remote.push(request.url())});
+          const capture=async name=>{
+            const dimensions=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
+            assert.ok(dimensions.scroll<=dimensions.width+1,JSON.stringify({name,...dimensions}));
+            await page.screenshot({path:artifacts+width+'-workbench-'+name+'.png',fullPage:true});
+            if(width===1194){
+              const buffer=await page.screenshot({type:'jpeg',quality:60,fullPage:false});
+              console.log('WB_PREVIEW_IMAGE '+name+' '+buffer.toString('base64'));
+            }
+          };
+          try{
+            await page.goto('file://'+previewPath,{waitUntil:'networkidle'});
+            await page.locator('.wb-hero').waitFor();
+            await page.getByText('独立预览 · 全部为虚构演示数据',{exact:true}).waitFor();
+            assert.match(await page.locator('.wb-data-strip').innerText(),/83\.3%/);
+            await capture('home');
+            await page.locator('[data-wb-open="DEMO-RESEARCH-A"]').first().click();
+            await page.locator('.wb-archive-grid').waitFor();
+            assert.ok(!(await page.locator('#content').innerText()).includes('演示：后来追加的复核笔记'));
+            await page.locator('[data-wb-time="later"]').click();
+            await page.getByText('演示：后来追加的复核笔记，不能出现在当时判断中。',{exact:true}).waitFor();
+            await page.locator('[data-wb-marker="1"]').click();
+            await page.locator('#wbEvidence').waitFor({state:'visible'});
+            await page.locator('#wbEvidence').getByText('数据截止 2026-10-13',{exact:true}).waitFor();
+            await page.keyboard.press('Escape');
+            await page.locator('#wbEvidence').waitFor({state:'detached'});
+            await capture('archive');
+            await page.locator('.wb-page-heading [data-go="evolution"]').click();
+            await page.locator('.wb-board').waitFor();
+            await page.locator('.wb-opportunity.invalid').waitFor();
+            await capture('evolution');
+            for(const [scene,label] of [['empty','已核验范围暂无结构观察'],['insufficient','无法完成判断'],['failed','无法完成判断'],['invalid','发现结构观察']]){
+              await page.locator('[data-preview-scene="'+scene+'"]').click();
+              if(scene==='invalid'){
+                await page.locator('.wb-risk-row').filter({hasText:'演示·失效样本B'}).waitFor();
+                assert.ok(!(await page.locator('.wb-candidate-area').innerText()).includes('演示·观察样本A'));
+              }else{
+                await page.locator('.wb-data-strip .wb-state').filter({hasText:label}).waitFor();
+                if(scene==='failed')assert.ok(!(await page.locator('#content').innerText()).includes('已核验范围暂无结构观察'));
+              }
+              await page.screenshot({path:artifacts+width+'-scene-'+scene+'.png',fullPage:true});
+            }
+            await page.locator('[data-preview-scene="observe"]').click();
+            await page.locator('[data-wb-update]').click();
+            await page.locator('#wbUpdateStatus').filter({hasText:'本次结果未留档'}).waitFor();
+            assert.deepEqual(errors,[]);assert.deepEqual(remote,[]);
+            browserChecks.push({width,height,mode:'new-workbench-replay-and-five-states',passed:true});
+          }finally{await context.close()}
+        }
       });
     }
 

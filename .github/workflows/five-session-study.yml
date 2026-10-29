@@ -1,0 +1,59 @@
+name: 五日规则真实数据研究
+on:
+  push:
+    branches: [upgrade/opportunity-workbench-v2]
+    paths:
+      - research/five-session-protocol.json
+      - historical-rule-study.js
+      - historical-rule-study.test.js
+      - scripts/run-five-session-study.mjs
+      - scripts/replay-five-session-study.mjs
+      - .github/workflows/five-session-study.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  study:
+    if: github.ref == 'refs/heads/upgrade/opportunity-workbench-v2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ''
+      AI_API_KEY: ''
+      FORECAST_API_URL: ''
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - name: 安装固定依赖
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: 验证研究模块
+        run: node --test historical-rule-study.test.js
+      - name: 读取首次运行冻结产物（不重取行情）
+        uses: actions/download-artifact@v4
+        with:
+          name: Allen-five-session-real-data-study
+          run-id: 40852067281
+          github-token: ${{ github.token }}
+          path: frozen-study
+      - name: 核验摘要后用原数据复算
+        run: |
+          set -euo pipefail
+          mkdir -p test-logs
+          node scripts/replay-five-session-study.mjs frozen-study 2>&1 | tee test-logs/five-session-study.log
+      - name: 保存原报告、更正口径和同一份数据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Allen-five-session-corrected-study
+          path: |
+            test-results/five-session-corrected/
+            test-logs/five-session-study.log
+            research/five-session-protocol.json
+          if-no-files-found: warn
+          retention-days: 7

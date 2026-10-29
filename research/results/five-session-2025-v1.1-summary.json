@@ -1,0 +1,883 @@
+{
+  "version": "five-session-reconstruction-1.1",
+  "protocolId": "allen-five-session-reconstruction-2025-v1",
+  "protocolSha256": "09f7057f8318a5f0b7fb343996c912ecf227705ff2ea659638f40e22a9453f41",
+  "sourceCommit": "89bb8ca9d8c33abf3baee672a0b9202c3a01caae",
+  "reconstructedAt": "2026-10-29T09:51:21.132Z",
+  "provenance": "reconstructed",
+  "dataKind": "historical_provider_data",
+  "approved": false,
+  "historicalQuoteScaleVerified": false,
+  "status": "partial_exploratory_study",
+  "winner": null,
+  "liveStrategyChanged": false,
+  "probabilitiesEnabled": false,
+  "coverage": {
+    "requestedStocks": 32,
+    "receivedStocks": 32,
+    "failedStocks": 0,
+    "eligibleStockDays": 7616,
+    "featureCoverage": 0.9654674369747899,
+    "priceLabelCoverage": 0.9332983193277311,
+    "benchmarkAvailable": true,
+    "benchmarkPriceLabels": 7108,
+    "missingBenchmarkLabels": 0,
+    "submittedStockDays": 7776,
+    "featureReadable": 7353,
+    "validPriceLabels": 7108,
+    "purgedBoundary": 160,
+    "exclusionReasons": {
+      "label_window_corporate_action": 230,
+      "split_volume_basis_unverified": 60,
+      "future_price_or_volume_unavailable": 15,
+      "成交量为零，停牌或交易状态待核验，暂停量能判断": 203
+    }
+  },
+  "definitions": {
+    "target": "次交易日开盘至第5交易日收盘的提供方价格变化；不是当时预测或交易胜率",
+    "legacy": "原观察条件，未包含完整先前上涨和阶段顺序；不使用不兼容的合格候选门槛",
+    "priorTrend": "仅在回调窗口之前40根日线内：后20根均价高于前20根，且末收盘高于首收盘；研究对照，不是正式策略",
+    "trigger": "原结构模块的价格突破且当日量比至少1.5；旧内部ID price_trigger_only 不表示已剥离量能条件，不能用它估计量能的独立增益",
+    "costWeighting": "主统计与成本情景均先算日期内股票等权、再对日期等权；股票日等权另列辅助统计，不能混合比较",
+    "simpleTrend": "当时收盘>MA20且MA20>MA60；固定简单对照",
+    "sampleBasis": "仓库当前固定A股名单，非当时全市场；含幸存者与选择偏差",
+    "uncertainty": "按官方交易日作10日移动块重采样，日期内等权，探索性区间；不证明未来优势"
+  },
+  "groups": [
+    {
+      "id": "all_readable",
+      "signalStockDays": 7353,
+      "labelledStockDays": 7108,
+      "labelMissing": 245,
+      "distinctDates": 238,
+      "distinctSymbols": 32,
+      "grossPositivePriceFraction": 0.5362971299943725,
+      "dailyEqualWeightMeanPriceReturn": 0.008634475543680544,
+      "dailyEqualWeightMeanIndexExcess": 0.003579922523686161,
+      "dailyEqualWeightMeanSampleExcess": 0,
+      "uncertainty": {
+        "rawReturn": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 238,
+          "replicates": 400,
+          "low": 0.003197962567646754,
+          "high": 0.014960661130315056
+        },
+        "sampleExcess": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 238,
+          "replicates": 400,
+          "low": 0,
+          "high": 0
+        }
+      },
+      "hypotheticalCostScenarios": [
+        {
+          "roundTripBps": 0,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": 0.008634475543680544,
+          "stockDayMeanAssumedReturn": 0.008298900970343958
+        },
+        {
+          "roundTripBps": 30,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": 0.005613104174103873,
+          "stockDayMeanAssumedReturn": 0.0052785348166634735
+        },
+        {
+          "roundTripBps": 60,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": 0.002600769807626734,
+          "stockDayMeanAssumedReturn": 0.0022672026594546834
+        }
+      ],
+      "quarters": [
+        {
+          "quarter": 1,
+          "dates": 57,
+          "meanPriceReturn": -0.0003946929955112717,
+          "meanSampleExcess": 0
+        },
+        {
+          "quarter": 2,
+          "dates": 60,
+          "meanPriceReturn": 0.009119496230858722,
+          "meanSampleExcess": 0
+        },
+        {
+          "quarter": 3,
+          "dates": 66,
+          "meanPriceReturn": 0.020181178045292205,
+          "meanSampleExcess": 0
+        },
+        {
+          "quarter": 4,
+          "dates": 55,
+          "meanPriceReturn": 0.0036068210054418857,
+          "meanSampleExcess": 0
+        }
+      ]
+    },
+    {
+      "id": "simple_trend",
+      "signalStockDays": 2734,
+      "labelledStockDays": 2613,
+      "labelMissing": 121,
+      "distinctDates": 238,
+      "distinctSymbols": 32,
+      "grossPositivePriceFraction": 0.5350172215843858,
+      "dailyEqualWeightMeanPriceReturn": 0.009416744998819608,
+      "dailyEqualWeightMeanIndexExcess": 0.004362191978825216,
+      "dailyEqualWeightMeanSampleExcess": 0.0007822694551390582,
+      "uncertainty": {
+        "rawReturn": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 238,
+          "replicates": 400,
+          "low": 0.002113197349529258,
+          "high": 0.01773335967811871
+        },
+        "sampleExcess": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 238,
+          "replicates": 400,
+          "low": -0.0030440921045371988,
+          "high": 0.004351003763158866
+        }
+      },
+      "hypotheticalCostScenarios": [
+        {
+          "roundTripBps": 0,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": 0.009416744998819608,
+          "stockDayMeanAssumedReturn": 0.012205815290666173
+        },
+        {
+          "roundTripBps": 30,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": 0.00639303033581765,
+          "stockDayMeanAssumedReturn": 0.00917374594880698
+        },
+        {
+          "roundTripBps": 60,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": 0.003378359684768947,
+          "stockDayMeanAssumedReturn": 0.006150745607970386
+        }
+      ],
+      "quarters": [
+        {
+          "quarter": 1,
+          "dates": 57,
+          "meanPriceReturn": -0.003257194266108346,
+          "meanSampleExcess": -0.002862501270597073
+        },
+        {
+          "quarter": 2,
+          "dates": 60,
+          "meanPriceReturn": 0.007366072931303058,
+          "meanSampleExcess": -0.0017534232995556616
+        },
+        {
+          "quarter": 3,
+          "dates": 66,
+          "meanPriceReturn": 0.028255585062104557,
+          "meanSampleExcess": 0.008074407016812344
+        },
+        {
+          "quarter": 4,
+          "dates": 55,
+          "meanPriceReturn": 0.0021820435074574067,
+          "meanSampleExcess": -0.0014247774979844767
+        }
+      ]
+    },
+    {
+      "id": "legacy_observation",
+      "signalStockDays": 730,
+      "labelledStockDays": 711,
+      "labelMissing": 19,
+      "distinctDates": 183,
+      "distinctSymbols": 28,
+      "grossPositivePriceFraction": 0.5541490857946554,
+      "dailyEqualWeightMeanPriceReturn": 0.006562882051161136,
+      "dailyEqualWeightMeanIndexExcess": 0.002590129594093939,
+      "dailyEqualWeightMeanSampleExcess": 0.00007014627946563793,
+      "uncertainty": {
+        "rawReturn": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 183,
+          "replicates": 400,
+          "low": 0.00045126495241957094,
+          "high": 0.012090434094401073
+        },
+        "sampleExcess": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 183,
+          "replicates": 400,
+          "low": -0.0064538011445646375,
+          "high": 0.00517676517294553
+        }
+      },
+      "hypotheticalCostScenarios": [
+        {
+          "roundTripBps": 0,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": 0.006562882051161136,
+          "stockDayMeanAssumedReturn": 0.005070920209724455
+        },
+        {
+          "roundTripBps": 30,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": 0.0035477161538536185,
+          "stockDayMeanAssumedReturn": 0.002060223494168622
+        },
+        {
+          "roundTripBps": 60,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": 0.0005415686989110232,
+          "stockDayMeanAssumedReturn": -0.0009414681464652209
+        }
+      ],
+      "quarters": [
+        {
+          "quarter": 1,
+          "dates": 52,
+          "meanPriceReturn": 0.00364201307460433,
+          "meanSampleExcess": 0.0044936140170043866
+        },
+        {
+          "quarter": 2,
+          "dates": 49,
+          "meanPriceReturn": 0.014881181081734921,
+          "meanSampleExcess": 0.007154341172945488
+        },
+        {
+          "quarter": 3,
+          "dates": 34,
+          "meanPriceReturn": 0.01101447866359197,
+          "meanSampleExcess": -0.009159855557277264
+        },
+        {
+          "quarter": 4,
+          "dates": 48,
+          "meanPriceReturn": -0.0019176544184182388,
+          "meanSampleExcess": -0.0054158080889357965
+        }
+      ]
+    },
+    {
+      "id": "legacy_with_prior_trend",
+      "signalStockDays": 218,
+      "labelledStockDays": 209,
+      "labelMissing": 9,
+      "distinctDates": 99,
+      "distinctSymbols": 21,
+      "grossPositivePriceFraction": 0.5980861244019139,
+      "dailyEqualWeightMeanPriceReturn": -0.00002733421904007135,
+      "dailyEqualWeightMeanIndexExcess": -0.004341207566892617,
+      "dailyEqualWeightMeanSampleExcess": -0.00592508076681052,
+      "uncertainty": {
+        "rawReturn": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 99,
+          "replicates": 400,
+          "low": -0.02286488768751079,
+          "high": 0.015446431225508381
+        },
+        "sampleExcess": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 99,
+          "replicates": 400,
+          "low": -0.019756715400762268,
+          "high": 0.005456507880178002
+        }
+      },
+      "hypotheticalCostScenarios": [
+        {
+          "roundTripBps": 0,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": -0.00002733421904007135,
+          "stockDayMeanAssumedReturn": 0.006199076396070583
+        },
+        {
+          "roundTripBps": 30,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": -0.0030227590790928727,
+          "stockDayMeanAssumedReturn": 0.0031850002810548976
+        },
+        {
+          "roundTripBps": 60,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": -0.006009224542754592,
+          "stockDayMeanAssumedReturn": 0.00017993934883596413
+        }
+      ],
+      "quarters": [
+        {
+          "quarter": 1,
+          "dates": 16,
+          "meanPriceReturn": -0.03758754778118785,
+          "meanSampleExcess": -0.016146101661945928
+        },
+        {
+          "quarter": 2,
+          "dates": 34,
+          "meanPriceReturn": 0.0026757117843073082,
+          "meanSampleExcess": -0.005311391975520651
+        },
+        {
+          "quarter": 3,
+          "dates": 25,
+          "meanPriceReturn": 0.020515212856127295,
+          "meanSampleExcess": 0.0006340187876465706
+        },
+        {
+          "quarter": 4,
+          "dates": 24,
+          "meanPriceReturn": -0.00021499355231634435,
+          "meanSampleExcess": -0.006812854660273686
+        }
+      ]
+    },
+    {
+      "id": "price_trigger_only",
+      "signalStockDays": 212,
+      "labelledStockDays": 201,
+      "labelMissing": 11,
+      "distinctDates": 113,
+      "distinctSymbols": 32,
+      "grossPositivePriceFraction": 0.4527363184079602,
+      "dailyEqualWeightMeanPriceReturn": -0.0014374673713167677,
+      "dailyEqualWeightMeanIndexExcess": -0.0043954958371725935,
+      "dailyEqualWeightMeanSampleExcess": -0.007086888127421601,
+      "uncertainty": {
+        "rawReturn": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 113,
+          "replicates": 400,
+          "low": -0.014564355180595722,
+          "high": 0.010987137153736335
+        },
+        "sampleExcess": {
+          "state": "exploratory_date_block_interval",
+          "signalDates": 113,
+          "replicates": 400,
+          "low": -0.01648654013340303,
+          "high": 0.003375059237165805
+        }
+      },
+      "hypotheticalCostScenarios": [
+        {
+          "roundTripBps": 0,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": -0.0014374673713167677,
+          "stockDayMeanAssumedReturn": 0.00406391968772433
+        },
+        {
+          "roundTripBps": 30,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": -0.004428668168007772,
+          "stockDayMeanAssumedReturn": 0.001056239449019219
+        },
+        {
+          "roundTripBps": 60,
+          "executable": false,
+          "dailyEqualWeightMeanAssumedReturn": -0.007410922202594919,
+          "stockDayMeanAssumedReturn": -0.0019424447371273457
+        }
+      ],
+      "quarters": [
+        {
+          "quarter": 1,
+          "dates": 23,
+          "meanPriceReturn": -0.0158238446665052,
+          "meanSampleExcess": -0.0032050444059274143
+        },
+        {
+          "quarter": 2,
+          "dates": 28,
+          "meanPriceReturn": 0.00046806337197226024,
+          "meanSampleExcess": -0.007996972224819713
+        },
+        {
+          "quarter": 3,
+          "dates": 46,
+          "meanPriceReturn": 0.005760271465801248,
+          "meanSampleExcess": -0.011658141238127135
+        },
+        {
+          "quarter": 4,
+          "dates": 16,
+          "meanPriceReturn": -0.004785227966953491,
+          "meanSampleExcess": 0.0020679613866556043
+        }
+      ]
+    }
+  ],
+  "downloads": [
+    {
+      "symbol": "000001.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.395Z",
+      "sourceSha256": "d354856c105c9800e7c810139458a9d6747deed51ffa1d13bc6d1a8238d25638",
+      "sanitizedDataSha256": "d55949f6f197ca4b65e7cbcc99b7b190a67327b82bc7c7fb8e9222a11fcdddaf",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "000001.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.259Z",
+      "sourceSha256": "639e075f58069690c9c420c21e11d2b218963358eb4c049af6da593920a5a234",
+      "sanitizedDataSha256": "95647cf452e724c8f6a82be2a830686036bb48cd004b7e14b31f53bcee34ce29",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "000333.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.201Z",
+      "sourceSha256": "a2db4398e8f32784d39db1e49f28329fd95f0bc21d772367d80d3030cad69668",
+      "sanitizedDataSha256": "ef7ae8ae65a1d0cc263d069dffff8ede031eb3e7be3583867483748a16fbc35d",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "000651.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.279Z",
+      "sourceSha256": "87259bd0996111af372d211a7fbeaed66e602329a64967c0ab79d55785e6942a",
+      "sanitizedDataSha256": "017b744ee49b5d20056b8d9b24c7f13cfe5d99fd97b8a2ade0d8104d28f4146d",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "000725.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.342Z",
+      "sourceSha256": "b6b8d96250d3f8e6e01431edfc1fb50ca380eed1199e17dc7db0f52dd839f23f",
+      "sanitizedDataSha256": "21d7a883ae2f2708e071dbc57b9d68281800234c029e1836803a15f5142ee4c8",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "000823.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.358Z",
+      "sourceSha256": "701268190bd78cb00c58e6008ddfc1466b02cb0e1df0a15a1033ac04ccadde51",
+      "sanitizedDataSha256": "02c7a99668c32b90ff6528c98fc410d242dffcbbc71e9457c0f2e09a435d34af",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "000858.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.417Z",
+      "sourceSha256": "617a472fabcb892a11cf0bcda959d5097fdad56e73aa21c9604c5706b7b94894",
+      "sanitizedDataSha256": "126822cb68a75ec3554585bb8295ce590da3dc7f29ee0edee39ee4b8b07648a2",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "000977.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.436Z",
+      "sourceSha256": "79750582d1c6bc1d5f45273f27232ff48899d05cef0d945c7b4b5c192533d7f7",
+      "sanitizedDataSha256": "28638144f78f58ae2a7c12f0f41b0fd2f1d74e9472087be3e92ac2aabf66ccb4",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "002230.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.484Z",
+      "sourceSha256": "283ba5e5fbcbfb10fd9614df5e2967542b04f8f1ff82313c9495ad1746cda030",
+      "sanitizedDataSha256": "7a9ea10322cb691034953901cad3b8b4fcb9359c67a63a8143b5f2baf90ec9cf",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "002463.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.528Z",
+      "sourceSha256": "388f94e6099774d7dab954014a31aa7af957d31f443bde1b3362686af7b93ba4",
+      "sanitizedDataSha256": "2bfd5e52d78db6514645462a8ba6b175e2eccfd68fcf37885f57fc96a960bf7b",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "002475.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.557Z",
+      "sourceSha256": "96f017104f3074d34b2d6beb69b33619807e6f9d853d82390a510b1b7eff9470",
+      "sanitizedDataSha256": "daa5849c57e40fcc25ffde6d0b616050bbecefd1f4c8d90af885bacb4a722e29",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "002594.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.596Z",
+      "sourceSha256": "40051c78fb9f864b4a9323830eee5a10bb165d0abb7d2608fc2f127e3d455a1e",
+      "sanitizedDataSha256": "233ba0b766c106aa19bc685c2de67704927a11527128bf8b01b5b9dce70f3226",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "300059.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.625Z",
+      "sourceSha256": "c96080df9602263f6909593afee364e3f7afb8face3d4b7bfb31e1dafe6835bc",
+      "sanitizedDataSha256": "d999d86b67ffdc91ed475a614d3930f22f6f9b8de804fcf4bdaaff1de8abc1a9",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "300308.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.697Z",
+      "sourceSha256": "f5eb9334e2bf1c95ed8f44f6a6ba65381b96ab8af932dfb18ecc14d47960a6d1",
+      "sanitizedDataSha256": "90afd40a039e401457324079d72f1e8284bc84c76a03e580af57491535ae6d5d",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "300750.SZ",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.692Z",
+      "sourceSha256": "9b3bf76a5653b2f076ddd67896c0686f6effb25aed79a0c2ca823fdab221aaea",
+      "sanitizedDataSha256": "3c4a212f34e92948aa2c427f862459f7c11abab836b7c6fc58286633802e9e76",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "600030.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.767Z",
+      "sourceSha256": "571d018643b398130c8ddf7dce58d21608f7759ee95a18ee8a0bb30b02d1ab12",
+      "sanitizedDataSha256": "3ebc795470b95a6a33c9d10a6c263ccaeb45a366968acdf6c8049934c018a1fe",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "600036.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.771Z",
+      "sourceSha256": "dfd17235a0d165a1d89c22f2801eca92abdf65d21a7fd15e2b6b52485995ac1d",
+      "sanitizedDataSha256": "46bc44a2f1460e084ce7c19471643124072d32359cf494aebbd3aca2606feb4d",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "600276.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.840Z",
+      "sourceSha256": "3babc484ec15f307d0e6da7d10178c379afb5db6c26c079891323c19520d09e9",
+      "sanitizedDataSha256": "33fb0ea8aa282699168a3c4480ee0d4d745a2fe979617b90f772df033794a957",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "600519.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.847Z",
+      "sourceSha256": "c3cfd908f58255f4497083654d26936187c45f8d42c9e291ebafdeb897248750",
+      "sanitizedDataSha256": "d4b94fc2014d2bc0f16ca1c5b4d6199c3aca5a051b9dad559b70b79945a69585",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "600667.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.917Z",
+      "sourceSha256": "d5d3accb8f4259b0c3d90ca08c0f5aca1a1a7db159dbaf84010d13e2ea24e415",
+      "sanitizedDataSha256": "678cd3a821ec0f7e610817c45b263a2f326a9bda7f020b5f031556b024699286",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "600887.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.922Z",
+      "sourceSha256": "eaea56573b88ecb00758b5ed080413181a818d8c63f81dbfe286b67df00d2914",
+      "sanitizedDataSha256": "97ace60c183b676449e45fdfa74d285112a0d01f82e700b130551da5ddcab0be",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "600900.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:15.989Z",
+      "sourceSha256": "e07e8a780709254f8fbb55245723390982955ec3e5d8dba389563b8bdfa5389c",
+      "sanitizedDataSha256": "24a79c7265f44d18b76ed09e85ef8da5bb24ff4bb01952948647a7cf17fc92f3",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "601012.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.021Z",
+      "sourceSha256": "c12a8207149d306f451153e8755c0b9ef4e62ca83260ec279a77f5833748f3be",
+      "sanitizedDataSha256": "28b65bf73048911bd859ee4bcdb3a27f1069f22f4e6c6784d38808244e0a6934",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "601088.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.073Z",
+      "sourceSha256": "1496254846045ef248d45330262b514ae76aeb056c9a979994afebb2e7738db8",
+      "sanitizedDataSha256": "47d7f11270bb1b17f35f24059b22e5aa9ade1fc3e0d2a50f7bd482576d88ae8a",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "601138.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.085Z",
+      "sourceSha256": "356e7f58ea9ec6bf42557cf35426ede162c16a4b0fbfde33a7417d4070c64d16",
+      "sanitizedDataSha256": "1ccdcba495433b75c67baa69f74bd7b177ad52018c22c09845b4493934313910",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "601166.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.143Z",
+      "sourceSha256": "7fb2455325671b782b746cd9d42580090a0a58b7e5656850064276caec91f215",
+      "sanitizedDataSha256": "e5acb3394c5a9b06043c2a1e9f686d9c2aa11aff296a2cd6ac0bf63580776fb1",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "601318.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.153Z",
+      "sourceSha256": "9d499dd3362c9ed1c200dc7dcb7c5e42f96993ceea6fa249214e7399c22324b2",
+      "sanitizedDataSha256": "bac7f1ea4d9b6f8d54345bd4891fbe132271cb0c46a7879a8c6d03634916ae12",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "601899.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.217Z",
+      "sourceSha256": "46eb8a86397009e915b42d55ad0bcd4c63864e690acbc26eebf7187c564f1727",
+      "sanitizedDataSha256": "c51fcb805a8b11e6fe27954efdba8203d497a5e92b879644d48d8e8d7893cb3a",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "603083.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.219Z",
+      "sourceSha256": "e4823f4d218dd537510a74bb64a4e04e693d2a8f588388125d12b83485361138",
+      "sanitizedDataSha256": "0b60fb7e36e4cbb82e6724090675688f31ad0feb2b413b6a68b1905c2674f496",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "603986.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.283Z",
+      "sourceSha256": "11b3a0e046a8838111acbbefb3a37ac47a4f4731c29439f07ee944f8c92737fb",
+      "sanitizedDataSha256": "b8cd079e8f18f25e0692374cd275fd5b783c45c7651bdc0ef2972cf58d7bf1cc",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "688008.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.280Z",
+      "sourceSha256": "0eda13657d058137673cad1b1206e74011f6be8628c3e9bdf2ad682a959ef94b",
+      "sanitizedDataSha256": "8460079099eeac3da024105c656298bde11abd19dca627e7b9d5a6defaf68013",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "688041.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.350Z",
+      "sourceSha256": "d3d9e970512aa942b1f7cd6eff0d5588b96c77b76ae66c949f6e3feca5817019",
+      "sanitizedDataSha256": "1b3b848d99886b8095b1e233fa9bd11c7dab4a2f9e1c5a160131794001365c39",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    },
+    {
+      "symbol": "688981.SS",
+      "state": "received",
+      "host": "query1.finance.yahoo.com",
+      "requestedFrom": "2024-01-01",
+      "requestedThrough": "2025-12-31",
+      "downloadedAt": "2026-10-29T09:45:16.339Z",
+      "sourceSha256": "a7fbcc2576cb32665fd36b48adc0a0c9a1786dd150378932f6977e41a86a7d54",
+      "sanitizedDataSha256": "a988674e28cdffa087e2d306eeb88eaecd55a836b5d3229e542c2277d427cbfb",
+      "rows": 485,
+      "dataFrom": "2024-01-02",
+      "dataThrough": "2025-12-31"
+    }
+  ],
+  "actualTradingReturn": null,
+  "portfolioMaxDrawdown": null,
+  "targetBeforeStop": null,
+  "limitations": [
+    "事后重建，不声称历史当时生成过预测；历史数据可能修订，无法证明严格未参与开发的样本",
+    "只请求2024—2025日线，2026测试区未评估；规则与名单不根据本次结果调整",
+    "当前名单不是无偏历史股票池，上市退市、停牌及板块状态不完整",
+    "Yahoo价格尺度与公司行动未经独立交易所核验；复权因子按观察日锚定不能恢复提供方已因未来拆股重写的历史quote，固定0.01报价单位可能改变边界信号；严格历史时点价格口径未验证",
+    "股票日信号重叠且相关，不能把行数当独立样本数；未模拟资金、仓位及真实组合",
+    "没有可靠成交标记；成本为假设可成交的比例费率情景，不含最低佣金、税差、实际滑点与冲击",
+    "固定五日价格研究不执行结构失效或交易止损，不能据此报告止盈止损先后或组合回撤"
+  ],
+  "datasetSha256": "4fb4a2f562aaee8e4537e12f030c4c0e0b9fb1fcfae71a290a81fb795f2eaeae",
+  "protocolFrozenBeforeDownloadAt": "2026-10-29T09:45:15.034Z",
+  "dataOrigin": {
+    "sourceCommit": "08899f582a978cf1ebf41d7c0a9e191e0d87249e",
+    "protocolSha256": "09f7057f8318a5f0b7fb343996c912ecf227705ff2ea659638f40e22a9453f41",
+    "datasetSha256": "4fb4a2f562aaee8e4537e12f030c4c0e0b9fb1fcfae71a290a81fb795f2eaeae",
+    "runId": 40852067281,
+    "artifactId": 12887930600,
+    "downloadedAt": "2026-10-29T09:45:15.034Z",
+    "noNewDataRequests": true
+  },
+  "correction": {
+    "reason": "统一成本与主统计的日期等权口径，辅助股票日统计单列；明确原触发组含量能条件及历史价格口径未核验",
+    "sameSelectionEvidenceAndLabels": true,
+    "sameGrossMetrics": true,
+    "originalReportPreserved": true
+  },
+  "analysisRun": {
+    "id": 40852860333,
+    "url": "https://github.com/460728888-alt/AllenPt1/actions/runs/40852860333",
+    "originalDataRunId": 40852067281
+  }
+}
