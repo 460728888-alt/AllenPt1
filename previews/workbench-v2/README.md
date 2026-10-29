@@ -1,21 +1,17 @@
-# Allen 机会研究台：实际截图
+# 最新预览：一键更新与独立离线核验
 
-以下均为 Chromium 1194×834 的实际截图，全部为虚构演示数据，不是实时行情、回测或模型成绩。
+全部截图为虚构演示数据，不代表真实行情、模型成绩或回测收益。
 
-代码提交：14af3096b4e3844fc9136f39492a123382b1da57
+对应代码：5515a5d630ef6f9cd05da58f4b4542fedfaa3e3c
 
-[通过的验收运行](https://github.com/460728888-alt/AllenPt1/actions/runs/40836905463)。代码分支与截图分支分开保留，截图提交不改变已验收代码。
-
-今日机会：
+[完整通过的验收](https://github.com/460728888-alt/AllenPt1/actions/runs/40841570420)，包含152项单元测试、两个时区的真实临时数据库与整站检查、三种尺寸浏览器检查和一键更新。离线工具只运行了合成自检，不证明真实准确率提升。
 
 ![今日机会](home.jpg)
 
-机会演化图：
-
 ![机会演化图](evolution.jpg)
-
-个股研究档案：
 
 ![个股研究档案](archive.jpg)
 
-完整页面、五种数据状态、手机和桌面截图，以及独立 HTML 预览位于上述 Actions 的 Allen-workbench-v2-preview-and-evidence 产物中（保留至 2026-11-05）。没有对外部署。
+[独立HTML、截图、离线框架合成报告与日志](https://github.com/460728888-alt/AllenPt1/actions/runs/40841570420#artifacts)，保留至2026-11-05。
+
+截图分支仅存放审阅材料，正式代码在upgrade/opportunity-workbench-v2。没有部署。
