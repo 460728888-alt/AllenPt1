@@ -94,3 +94,16 @@ test('an older delayed study response cannot overwrite a newer validation-page r
  await older;
  assert.equal(nodes.get('#content').innerHTML,expected);
 });
+
+test('malformed group elements or cost arrays show an unreadable report instead of a blank page',()=>{
+ const report=JSON.parse(fs.readFileSync(new URL('./research/results/five-session-2025-v1.1-summary.json',import.meta.url),'utf8'));
+ for(const mutation of ['null_group','bad_cost','null_cost']){
+  const broken=structuredClone(report);
+  if(mutation==='null_group')broken.groups[0]=null;
+  if(mutation==='bad_cost')broken.groups[0].hypotheticalCostScenarios={};
+  if(mutation==='null_cost')broken.groups[0].hypotheticalCostScenarios=[null];
+  const {run}=setup();run('globalThis.broken='+JSON.stringify(broken));
+  const html=run('wbHistoricalStudy(broken)');
+  assert.match(html,/报告暂不可读取/);assert.ok(!html.includes('<table'));
+ }
+});

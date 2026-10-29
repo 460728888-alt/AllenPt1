@@ -938,7 +938,10 @@ app.get('/api/validation/five-session',auth,(_req,res)=>{
   const protocol=JSON.parse(fs.readFileSync(path.join(root,'research/five-session-protocol.json'),'utf8'));
   const digest=crypto.createHash('sha256').update(JSON.stringify(protocol)).digest('hex');
   if(report.protocolSha256!==digest||report.provenance!=='reconstructed'||report.approved!==false||
-   report.probabilitiesEnabled!==false||report.liveStrategyChanged!==false||!Array.isArray(report.groups))
+   report.probabilitiesEnabled!==false||report.liveStrategyChanged!==false||!Array.isArray(report.groups)||
+   JSON.stringify(report.groups.map(g=>g?.id))!==JSON.stringify(protocol.rules)||
+   report.groups.some(g=>!Array.isArray(g.hypotheticalCostScenarios)||g.hypotheticalCostScenarios.some(c=>!c||typeof c!=='object'))||
+   !report.coverage||typeof report.coverage!=='object'||Array.isArray(report.coverage))
    throw Error('研究来源与冻结协议不一致');
   res.set('Cache-Control','no-store').json({report});
  }catch(error){res.status(503).json({error:'历史研究暂不可读取；不能据此判断没有机会',detail:error.message})}

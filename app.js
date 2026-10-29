@@ -586,7 +586,9 @@ function wbShowEvidence(snapshot,title,event){
 }
 function wbHistoricalStudy(report,error=''){
  const valid=report?.provenance==='reconstructed'&&report.approved===false&&report.probabilitiesEnabled===false&&
-  report.dataKind==='historical_provider_data'&&Array.isArray(report.groups)&&report.coverage;
+  report.dataKind==='historical_provider_data'&&Array.isArray(report.groups)&&report.groups.length===5&&
+  report.groups.every(g=>g&&typeof g.id==='string'&&Array.isArray(g.hypotheticalCostScenarios)&&g.hypotheticalCostScenarios.every(c=>c&&typeof c==='object'))&&
+  report.coverage&&typeof report.coverage==='object'&&!Array.isArray(report.coverage);
  if(!valid)return '<section class="wb-panel wb-study"><h3>五交易日历史研究</h3><p class="wb-warning">研究报告暂不可读取：'+esc(error||'格式或来源未通过核验')+'。不能据此判断没有机会。</p></section>';
  const pct=value=>Number.isFinite(value)?fmt(value*100,2)+'%':'未核验';
  const count=value=>Number.isInteger(value)?String(value):'未核验';
