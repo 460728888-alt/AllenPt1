@@ -584,16 +584,50 @@ function wbShowEvidence(snapshot,title,event){
  '<p class="wb-warning">字段支持不代表整套策略有效；缺少历史顺序时不能补造确认。</p></dialog>');
  const dialog=$('#wbEvidence');dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();
 }
+function wbHistoricalStudy(report,error=''){
+ const valid=report?.provenance==='reconstructed'&&report.approved===false&&report.probabilitiesEnabled===false&&
+  report.dataKind==='historical_provider_data'&&Array.isArray(report.groups)&&report.coverage;
+ if(!valid)return '<section class="wb-panel wb-study"><h3>五交易日历史研究</h3><p class="wb-warning">研究报告暂不可读取：'+esc(error||'格式或来源未通过核验')+'。不能据此判断没有机会。</p></section>';
+ const pct=value=>Number.isFinite(value)?fmt(value*100,2)+'%':'未核验';
+ const count=value=>Number.isInteger(value)?String(value):'未核验';
+ const names={all_readable:'固定样本全部可读',simple_trend:'简单均线趋势',legacy_observation:'原量价观察',
+  legacy_with_prior_trend:'原观察＋前置趋势',price_trigger_only:'原放量突破（含量能）'};
+ const interval=v=>Number.isFinite(v?.low)&&Number.isFinite(v?.high)?pct(v.low)+' ～ '+pct(v.high):'日期不足，未提供';
+ return '<section class="wb-panel wb-study"><span class="wb-overline">REAL HISTORY / RECONSTRUCTED</span>'+
+ '<h3>五交易日历史研究 · 收益优势未证明</h3>'+
+ '<p>2025年事后重建：下一交易日开盘至第5交易日收盘。使用真实提供方日线；不是当时预测、当前上涨概率或可执行回测。</p>'+
+ '<p>固定请求 '+count(report.coverage.requestedStocks)+' 只，取得 '+count(report.coverage.receivedStocks)+' 只，下载失败 '+count(report.coverage.failedStocks)+' 只；有效价格标签 '+
+ count(report.coverage.validPriceLabels)+' / '+count(report.coverage.eligibleStockDays)+'（'+pct(report.coverage.priceLabelCoverage)+'）。</p>'+
+ '<p class="wb-warning">本样本尚不能确认稳定优势。当前名单有幸存者偏差；历史报价可能经后续拆股修订，严格当时价格口径未核验。短期概率不启用。</p>'+
+ '<div class="wb-study-scroll" role="region" aria-label="历史规则比较，可横向滚动" tabindex="0"><table class="wb-study-table"><caption>固定顺序比较；不按结果挑选胜者</caption><thead><tr>'+
+ '<th scope="col">规则组</th><th scope="col">有效标签 / 信号股票日</th><th scope="col">不同日期</th><th scope="col">历史价格上涨比例</th><th scope="col">日等权价格变化</th><th scope="col">假设往返0.30%后</th></tr></thead><tbody>'+
+ report.groups.map(g=>'<tr><th scope="row">'+esc(names[g.id]||g.id)+'</th><td>'+count(g.labelledStockDays)+' / '+count(g.signalStockDays)+'</td><td>'+count(g.distinctDates)+'</td><td>'+
+ pct(g.grossPositivePriceFraction)+'</td><td>'+pct(g.dailyEqualWeightMeanPriceReturn)+'</td><td>'+
+ pct(g.hypotheticalCostScenarios?.find(c=>c.roundTripBps===30)?.dailyEqualWeightMeanAssumedReturn)+'</td></tr>').join('')+'</tbody></table></div>'+
+ '<p><small>上涨比例以有效股票日计；价格变化与费用情景均按日期等权。股票日重复且窗口重叠，不等于独立交易。比例费用假设可成交，不是实际收益；跳空、跌停、停牌及最低佣金等尚未模拟。</small></p>'+
+ '<details><summary>查看对照、缺口与来源</summary>'+
+ report.groups.map(g=>'<p><b>'+esc(names[g.id]||g.id)+'</b> · 相对同日固定样本 '+pct(g.dailyEqualWeightMeanSampleExcess)+
+ '，探索性区间 '+interval(g.uncertainty?.sampleExcess)+'。'+(g.id==='price_trigger_only'?'本组还要求量比至少1.5，不能用来证明量能单独贡献。':'')+'</p>').join('')+
+ '<p>特征可读 '+count(report.coverage.featureReadable)+'；跨界隔离 '+count(report.coverage.purgedBoundary)+'。'+
+ Object.entries(report.coverage.exclusionReasons||{}).map(([key,n])=>esc(key)+'：'+count(n)).join('；')+'</p>'+
+ '<p>2024年暖机，2026年未请求。真实重建时间 '+esc(report.reconstructedAt)+'。原始报告保留，复算未改变信号或标签，未重新下载行情。</p>'+
+ '<p>模型准确率、实际交易收益、止盈止损顺序及组合最大回撤均未验证。T1＋1.5仍不兼容，合格候选未判定，T2未启用。</p>'+
+ '<p>计算代码 '+esc(report.sourceCommit)+'<br>数据摘要 '+esc(report.datasetSha256)+'<br>协议摘要 '+esc(report.protocolSha256)+'</p></details></section>';
+}
+
 async function validationPage(){
  $('#content').innerHTML='<div class="wb-loading">正在读取验证状态…</div>';
- const data=await wbLoad('validation');if(!data)return;
- $('#content').innerHTML=wbHeader('ALLEN / VALIDATION','验证与限制','先看未参与训练的数据、扣费后表现和回撤；不按最高胜率挑模型。')+
+ const owner=currentUser;
+ const [data,study]=await Promise.all([wbLoad('validation'),api('/api/validation/five-session').then(value=>({report:value.report})).catch(error=>({error:error.message||'请求失败'}))]);
+ if(!data||currentUser!==owner||state.page!=='validation')return;
+ $('#content').innerHTML=wbHeader('ALLEN / VALIDATION','验证与限制','先核对数据与规则，再看扣费后表现和回撤；不按最高胜率挑模型。')+
  '<section class="wb-validation-hero"><span class="wb-state">研究可继续 · 收益优势未证明</span><h2>我们目前知道什么？</h2><p>可靠性测试检查数据、计算、保存和界面行为，不证明策略赚钱。正式短期策略、成交规则和风险预算仍待确定。</p></section><div class="wb-validation-grid">'+
  [['01','预测目标','上涨、跑赢基准、先止盈后止损是三个不同目标；尚未确认目标时不混成一个概率。'],
  ['02','公平验证','后续按时间划分、处理标签跨界、扣除成本并披露幸存者偏差。当前不展示未经验证的回测成绩。'],
  ['03','风险约束','风险预算待设置。止损参考不保证退出价格；需考虑跳空、停牌、跌停、T+1与流动性。'],
  ['04','完整公开','观察、失效、数据缺口、未预测及未成交都应保留；完成复盘不等于判断正确。']].map(([n,t,p])=>'<section class="wb-panel"><span class="wb-overline">'+n+'</span><h3>'+t+'</h3><p>'+p+'</p></section>').join('')+'</div>'+
- '<section class="wb-panel"><h3>短期离线核验工具</h3><p>已提供按时间隔离、逐目标比较和概率校准检查的工具；目前仅有合成自检，没有真实策略成绩。仓库原有报告主要针对20日，不能套用成一周上涨证据。</p><p>上涨与跑赢基准分别统计。先止盈后止损缺少成交时间顺序，暂不评估；组合回撤也未完成验证。</p><p>正式策略仍待确定，不自动训练、挑选或启用模型。</p></section>'+
+ wbHistoricalStudy(study.report,study.error)+
+ '<section class="wb-panel"><h3>短期离线核验工具</h3><p>已提供按时间隔离、逐目标比较和概率校准检查的工具；工具框架自检使用合成数据，上方历史价格研究独立标明真实来源，仍不等于正式策略成绩。仓库原有报告主要针对20日，不能套用成一周上涨证据。</p><p>上涨与跑赢基准分别统计。先止盈后止损缺少成交时间顺序，暂不评估；组合回撤也未完成验证。</p><p>正式策略仍待确定，不自动训练、挑选或启用模型。</p></section>'+
  '<section class="wb-panel"><h3>当前模型与筛选状态</h3><p>'+esc(data.errors.model||data.model?.message||'当前模型验证说明未返回；不推断可用性。')+'</p><p>模型版本 '+esc(data.model?.version||'未返回')+' · 是否启用 '+(data.model?.active===true?'以模型清单逐周期核验':'当前未启用／未确认')+'</p><p>本研究台不把规则分、历史频率或模型排序展示成已验证的上涨概率。</p><p>T1＋1.5 配置不兼容，合格候选未判定；T2未启用。</p><button class="wb-button secondary" data-go="prediction">打开原趋势研究与记录</button></section>'+wbStatus(data)+disclaimer();
 }
 

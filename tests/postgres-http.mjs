@@ -208,6 +208,19 @@ await test('real site restart, failure notices and backup export',{
     });
 
     let beforeRestart;
+    await t.test('frozen retrospective study is authenticated and remains separate from forecasts',async()=>{
+      const denied=await request('/api/validation/five-session',{headers:{Cookie:''}});
+      assert.equal(denied.status,401);
+      const {report}=await json('/api/validation/five-session');
+      assert.equal(report.provenance,'reconstructed');assert.equal(report.approved,false);
+      assert.equal(report.probabilitiesEnabled,false);assert.equal(report.historicalQuoteScaleVerified,false);
+      assert.equal(report.coverage.validPriceLabels,7108);
+      assert.equal(report.actualTradingReturn,null);assert.equal(report.portfolioMaxDrawdown,null);
+      assert.equal(report.dataOrigin.noNewDataRequests,true);
+      for(const group of report.groups)
+        assert.ok(Math.abs(group.hypotheticalCostScenarios[0].dailyEqualWeightMeanAssumedReturn-group.dailyEqualWeightMeanPriceReturn)<1e-14);
+    });
+
     await t.test('HTTP notes append once and leave the original unchanged',async()=>{
       const data={
         requestKey:'synthetic-http-note',
@@ -520,6 +533,29 @@ await test('real site restart, failure notices and backup export',{
           assert.deepEqual(errors,[]);
         }finally{await context.close()}
       });
+      await t.test('historical comparison discloses reconstruction and scrolls within tablet phone desktop viewports',async()=>{
+        for(const [width,height]of [[1194,834],[390,844],[1440,900]]){
+          const {context,page,errors}=await openPage(width,height,'observe');
+          try{
+            await page.locator('#shell').waitFor({state:'visible'});
+            await navigate(page,'validation','研究工具');
+            const panel=page.locator('.wb-study');
+            await panel.getByRole('heading',{name:'五交易日历史研究 · 收益优势未证明',exact:true}).waitFor();
+            const text=await panel.innerText();
+            assert.match(text,/2025年事后重建/);assert.match(text,/7108 \/ 7616/);
+            assert.match(text,/严格当时价格口径未核验/);assert.match(text,/短期概率不启用/);
+            assert.equal(await panel.locator('tbody tr').count(),5);
+            assert.ok(await panel.locator('tbody').innerText().then(s=>s.includes('0.56%')));
+            await panel.locator('summary').click();
+            assert.match(await panel.innerText(),/量比至少1.5/);
+            const size=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth}));
+            assert.ok(size.scroll<=size.width+2,JSON.stringify(size));
+            await page.screenshot({path:artifacts+'historical-study-'+width+'x'+height+'.png',fullPage:true});
+            assert.deepEqual(errors,[]);
+          }finally{await context.close()}
+        }
+      });
+
       await t.test('standalone synthetic preview demonstrates all three pages and five data states',async()=>{
         const {buildWorkbenchPreview}=await import('../scripts/build-workbench-preview.mjs');
         const previewPath=root+'test-results/Allen-opportunity-preview.html';

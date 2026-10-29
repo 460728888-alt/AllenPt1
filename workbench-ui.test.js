@@ -61,3 +61,20 @@ test('fresh accounts are not given a fictional holding or investment thesis',()=
   assert.equal(run('state.portfolio.length'),0);
   assert.equal(run('state.theses.length'),0);
 });
+
+test('real historical summary is labelled reconstructed and costs use the primary date weighting',async()=>{
+ const report=JSON.parse(fs.readFileSync(new URL('./research/results/five-session-2025-v1.1-summary.json',import.meta.url),'utf8'));
+ const {nodes,run}=setup();run('globalThis.studyReport='+JSON.stringify(report));
+ run("state.page='validation';api=async url=>url==='/api/validation/five-session'?{report:studyReport}:url==='/api/volume-screen/latest'?{result:fixture.scan}:url==='/api/research-history'?{items:fixture.history}:url==='/api/ai/radar-history'?{reports:fixture.reports}:url==='/api/workbench/context'?fixture.context:fixture.model");
+ await run('validationPage()');
+ const html=nodes.get('#content').innerHTML;
+ for(const text of ['2025年事后重建','严格当时价格口径未核验','短期概率不启用','7108 / 7616','93.33%','0.56%','不是实际收益'])assert.ok(html.includes(text),text);
+ assert.equal((html.match(/<tr>/g)||[]).length,6);
+ assert.ok(!html.includes('目前仅有合成自检，没有真实策略成绩'));
+});
+test('unreadable or non-historical studies never become zero-return or no-opportunity claims',()=>{
+ const {run}=setup();
+ const html=run("wbHistoricalStudy({approved:true,provenance:'reconstructed'},'合成：来源失配')");
+ assert.match(html,/来源失配/);assert.match(html,/不能据此判断没有机会/);
+ assert.ok(!html.includes('<table'));
+});

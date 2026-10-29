@@ -932,6 +932,18 @@ app.post('/api/signals/snapshot',auth,async(req,res)=>{
   catch(error){res.status(500).json({error:'评分变化暂时无法保存',detail:error.message})}
 });
 
+app.get('/api/validation/five-session',auth,(_req,res)=>{
+ try{
+  const report=JSON.parse(fs.readFileSync(path.join(root,'research/results/five-session-2025-v1.1-summary.json'),'utf8'));
+  const protocol=JSON.parse(fs.readFileSync(path.join(root,'research/five-session-protocol.json'),'utf8'));
+  const digest=crypto.createHash('sha256').update(JSON.stringify(protocol)).digest('hex');
+  if(report.protocolSha256!==digest||report.provenance!=='reconstructed'||report.approved!==false||
+   report.probabilitiesEnabled!==false||report.liveStrategyChanged!==false||!Array.isArray(report.groups))
+   throw Error('研究来源与冻结协议不一致');
+  res.set('Cache-Control','no-store').json({report});
+ }catch(error){res.status(503).json({error:'历史研究暂不可读取；不能据此判断没有机会',detail:error.message})}
+});
+
 app.get('/api/research/:symbol',auth,async(req,res)=>{
   try{res.json(await getResearchData(req.params.symbol))}
   catch(error){res.status(502).json({error:error.message||'深度研究数据暂时不可用'})}

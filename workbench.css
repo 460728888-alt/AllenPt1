@@ -199,3 +199,16 @@
 .wb-update-running{padding:16px 20px;margin:16px 0;background:#edf4ff;border:1px solid #c8d8ed;border-radius:12px;color:#42678f}
 .wb-update-running b{font-size:13px}.wb-update-running p{font-size:12px;margin:8px 0}.wb-update-running small{font-size:10px}
 .wb-update-done{padding:13px 17px;border-radius:9px;background:#ecf4f1;color:#437368;font-size:12px;line-height:1.8}
+
+/* Historical study: narrow table scrolls within its own region on phones. */
+.wb-study .wb-overline{display:block;margin-bottom:12px}
+.wb-study-scroll{max-width:100%;overflow-x:auto;border:1px solid #dce3eb;border-radius:10px;margin:18px 0}
+.wb-study-table{width:100%;border-collapse:collapse;min-width:710px;font-size:11px;text-align:right;font-variant-numeric:tabular-nums}
+.wb-study-table caption{padding:12px;text-align:left;font-size:11px;color:#6c8096}
+.wb-study-table th,.wb-study-table td{padding:13px 12px;border-top:1px solid #e6edf4;white-space:nowrap}
+.wb-study-table th:first-child{text-align:left}.wb-study-table thead{background:#f0f5fa;color:#56708d}
+.wb-study-table tbody th{color:#385574;font-weight:650}
+.wb-study details{margin-top:14px;border-top:1px solid #dce3eb;padding-top:14px}
+.wb-study summary{font-size:12px;font-weight:700;color:#446384;cursor:pointer;min-height:30px}
+.wb-study details p{font-size:11px;overflow-wrap:anywhere}
+.wb-study-scroll:focus-visible{outline:3px solid #397de8;outline-offset:3px}
